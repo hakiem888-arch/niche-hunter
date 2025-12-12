@@ -9,10 +9,14 @@ from collections import Counter
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V5.0", layout="wide", page_icon="🔥")
+st.set_page_config(page_title="Pro Niche Finder V5.1 (Dark)", layout="wide", page_icon="🌙")
 
-# --- API KEY ---
-YOUTUBE_API_KEY = YOUTUBE_API_KEY = st.secrets["YOUTUBE_API_KEY"]
+# --- API KEY (Mengambil dari Secrets) ---
+try:
+    YOUTUBE_API_KEY = st.secrets["YOUTUBE_API_KEY"]
+except:
+    st.error("API Key belum disetting di Secrets!")
+    st.stop()
 
 # ==========================================
 # 2. DATA REFERENSI
@@ -74,52 +78,84 @@ LICENSE_OPTIONS = {
 }
 
 # ==========================================
-# 3. CUSTOM CSS
+# 3. CUSTOM CSS (FULL DARK MODE)
 # ==========================================
 st.markdown("""
 <style>
-    .stApp { background-color: #FFFFFF; color: #333; }
-    section[data-testid="stSidebar"] { background-color: #F8F9FA; border-right: 1px solid #E5E7EB; }
-    
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        background: white; border: 1px solid #e5e7eb; border-radius: 12px;
-        padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    /* 1. BACKGROUND UTAMA GELAP */
+    .stApp {
+        background-color: #0E1117;
+        color: #FAFAFA;
     }
     
+    /* 2. SIDEBAR AGAK TERANG DIKIT */
+    section[data-testid="stSidebar"] {
+        background-color: #262730;
+        border-right: 1px solid #333;
+    }
+    
+    /* 3. KARTU VIDEO (DARK GREY) */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #1E1E1E; /* Warna kartu */
+        border: 1px solid #444;
+        border-radius: 12px;
+        padding: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    
+    /* 4. TEKS JUDUL PUTIH */
     .video-title {
-        font-family: sans-serif; font-weight: 700; font-size: 14px;
-        color: #1f2937; line-height: 1.4; height: 40px; overflow: hidden;
+        font-family: sans-serif;
+        font-weight: 700;
+        font-size: 14px;
+        color: #FFFFFF; /* Putih */
+        line-height: 1.4;
+        height: 40px;
+        overflow: hidden;
         margin-bottom: 8px;
     }
-    .meta-info { font-size: 11px; color: #6b7280; margin-bottom: 8px; }
     
-    .stats-bar {
-        display: flex; justify-content: space-between; background: #f3f4f6;
-        padding: 6px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;
-        color: #374151; margin-bottom: 8px;
+    /* 5. TEKS META (ABU-ABU TERANG) */
+    .meta-info {
+        font-size: 11px;
+        color: #BBBBBB;
+        margin-bottom: 8px;
     }
     
+    /* 6. STATS BAR (HITAM) */
+    .stats-bar {
+        display: flex;
+        justify-content: space-between;
+        background: #000000;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #CCCCCC;
+        margin-bottom: 8px;
+        border: 1px solid #333;
+    }
+    
+    /* BADGES (TETAP SAMA TAPI BORDER LEBIH GELAP) */
     .vph-badge {
         background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
         color: white; font-weight: 700; font-size: 13px; text-align: center;
         padding: 6px; border-radius: 6px; margin-top: 5px;
     }
-
-    /* BADGES */
     .money-badge {
-        background-color: #dcfce7; color: #166534; font-weight: bold;
+        background-color: #064e3b; color: #6ee7b7; font-weight: bold; /* Hijau Gelap */
         padding: 3px 6px; border-radius: 4px; font-size: 10px;
-        border: 1px solid #bbf7d0; display: inline-block; margin-right: 3px;
+        border: 1px solid #065f46; display: inline-block; margin-right: 3px;
     }
     .er-badge {
-        background-color: #ffedd5; color: #9a3412; font-weight: bold;
+        background-color: #7c2d12; color: #fdba74; font-weight: bold; /* Oranye Gelap */
         padding: 3px 6px; border-radius: 4px; font-size: 10px;
-        border: 1px solid #fed7aa; display: inline-block; margin-right: 3px;
+        border: 1px solid #9a3412; display: inline-block; margin-right: 3px;
     }
     .gem-badge {
-        background-color: #e0f2fe; color: #0369a1; font-weight: bold;
+        background-color: #0c4a6e; color: #7dd3fc; font-weight: bold; /* Biru Gelap */
         padding: 3px 6px; border-radius: 4px; font-size: 10px;
-        border: 1px solid #bae6fd; display: inline-block;
+        border: 1px solid #075985; display: inline-block;
     }
     .rank-badge {
         background-color: #ef4444; color: white; font-weight: bold;
@@ -127,38 +163,39 @@ st.markdown("""
         display: inline-block; margin-bottom: 5px;
     }
     
+    /* CHIPS & TAGS */
     .tag-pill {
-        display: inline-block; background: #eff6ff; color: #2563eb;
+        display: inline-block; background: #333; color: #AAA;
         padding: 2px 8px; border-radius: 10px; font-size: 10px;
-        margin: 2px; border: 1px solid #bfdbfe;
+        margin: 2px; border: 1px solid #555;
     }
-    
     .seo-chip {
-        display: inline-block; background: #f3f4f6; color: #374151;
+        display: inline-block; background: #333; color: #DDD;
         padding: 6px 12px; border-radius: 20px; font-size: 12px;
-        margin: 4px; border: 1px solid #d1d5db; font-weight: 500;
+        margin: 4px; border: 1px solid #555; font-weight: 500;
     }
     .seo-count {
-        background: #e5e7eb; padding: 0 5px; border-radius: 4px; 
-        font-size: 10px; font-weight: bold; margin-left: 5px;
+        background: #555; padding: 0 5px; border-radius: 4px; 
+        font-size: 10px; font-weight: bold; margin-left: 5px; color: white;
     }
     
+    /* BOX DESKRIPSI */
     .desc-box {
-        font-size: 12px; color: #4b5563; background: #f9fafb;
-        padding: 10px; border-radius: 6px; border: 1px dashed #d1d5db;
+        font-size: 12px; color: #CCC; background: #222;
+        padding: 10px; border-radius: 6px; border: 1px dashed #555;
         line-height: 1.5;
     }
     
     .summary-bullet { margin-bottom: 5px; display: block; }
     
     .duration-badge {
-        background-color: rgba(0,0,0,0.8); color: white;
+        background-color: rgba(255,255,255,0.2); color: white;
         padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;
     }
     
     .stalker-box {
-        background-color: #1e1e1e; color: white; padding: 20px; border-radius: 15px;
-        margin-bottom: 20px; border: 2px solid #333;
+        background-color: #111; color: white; padding: 20px; border-radius: 15px;
+        margin-bottom: 20px; border: 1px solid #444; box-shadow: 0 4px 10px rgba(0,0,0,0.5);
     }
     .stalker-stat {
         text-align: center; border-right: 1px solid #444;
@@ -288,12 +325,9 @@ def analyze_channel(channel_id):
         }
     except Exception as e: return None
 
-# --- CORE PROCESSING FUNCTION (Dipakai untuk Search & Trending) ---
 def process_video_response(items, youtube, region_code):
-    """Fungsi pembantu untuk memproses data video dari API"""
     channel_ids = list(set([item['snippet']['channelId'] for item in items]))
     subs_map = get_channel_subs(youtube, channel_ids)
-    
     results = []
     for i, item in enumerate(items):
         stats = item['statistics']
@@ -321,7 +355,7 @@ def process_video_response(items, youtube, region_code):
         duration_fmt = parse_duration(content.get('duration', 'PT0S'))
 
         results.append({
-            'rank': i + 1, # Untuk trending
+            'rank': i + 1,
             'id': item['id'],
             'channel_id': channel_id,
             'title': snippet['title'],
@@ -349,252 +383,8 @@ def process_video_response(items, youtube, region_code):
         })
     return results
 
-# --- FUNGSI SEARCH (KEYWORD) ---
 def search_youtube(query, region_code='ID', duration='any', 
                    category_id=None, published_after=None, 
                    license_type=None, sort_order='relevance', max_results=12):
     try:
-        youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
-        api_order = sort_order
-        if sort_order in ['vph_custom', 'ratio_custom']: api_order = 'viewCount' 
-
-        search_params = {
-            'q': query, 'part': 'snippet', 'type': 'video',
-            'maxResults': max_results, 'order': api_order
-        }
-        
-        if region_code: search_params['regionCode'] = region_code
-        if duration != 'any': search_params['videoDuration'] = duration
-        if category_id: search_params['videoCategoryId'] = category_id
-        if published_after: search_params['publishedAfter'] = published_after
-        if license_type: search_params['videoLicense'] = license_type
-        
-        search_response = youtube.search().list(**search_params).execute()
-        video_ids = [item['id']['videoId'] for item in search_response['items']]
-        if not video_ids: return []
-
-        stats_response = youtube.videos().list(
-            part='snippet,statistics,contentDetails',
-            id=','.join(video_ids)
-        ).execute()
-
-        results = process_video_response(stats_response['items'], youtube, region_code)
-        
-        if sort_order == 'vph_custom': return sorted(results, key=lambda x: x['vph'], reverse=True)
-        elif sort_order == 'ratio_custom': return sorted(results, key=lambda x: x['ratio'], reverse=True)
-        return results
-    except Exception as e:
-        st.error(f"Error API: {e}")
-        return []
-
-# --- FUNGSI BARU: TRENDING (NO KEYWORD) ---
-def get_trending_videos(region_code='ID', category_id=None, max_results=12):
-    try:
-        youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
-        
-        params = {
-            'part': 'snippet,statistics,contentDetails',
-            'chart': 'mostPopular',
-            'regionCode': region_code,
-            'maxResults': max_results
-        }
-        if category_id:
-            params['videoCategoryId'] = category_id
-            
-        response = youtube.videos().list(**params).execute()
-        
-        # Proses data menggunakan fungsi yang sama
-        results = process_video_response(response['items'], youtube, region_code)
-        return results
-    except Exception as e:
-        st.error(f"Error API Trending: {e}")
-        return []
-
-# ==========================================
-# 5. UI FRONTEND
-# ==========================================
-
-with st.sidebar:
-    st.title("🎛️ Menu Navigasi")
-    # MENU SELECTOR
-    mode = st.radio("Pilih Mode:", ["🔍 Pencarian Kata Kunci", "🔥 Trending (Viral)"])
-    
-    st.markdown("---")
-    
-    if mode == "🔍 Pencarian Kata Kunci":
-        st.header("⚙️ Filter Pencarian")
-        query = st.text_input("Kata Kunci", placeholder="Misal: Resep Viral")
-        country_name = st.selectbox("🌍 Lokasi Negara", list(COUNTRY_CODES.keys()), index=1)
-        
-        c1, c2 = st.columns(2)
-        with c1: dur = st.selectbox("Durasi", ["Semua", "Short (<4m)", "Medium (4-20m)", "Long (>20m)"])
-        with c2: cat_name = st.selectbox("Kategori", list(CATEGORIES.keys()))
-        
-        time_label = st.selectbox("Waktu Publikasi", list(TIME_FILTERS.keys()))
-        lic_label = st.selectbox("Lisensi", list(LICENSE_OPTIONS.keys()))
-        sort_label = st.selectbox("Urutkan Berdasarkan", list(SORT_OPTIONS.keys()), index=0)
-        
-        btn_cari = st.button("🚀 Cari Video", type="primary", use_container_width=True)
-    
-    else: # MODE TRENDING
-        st.header("⚙️ Filter Trending")
-        st.info("Melihat video yang sedang viral secara Real-Time.")
-        country_name = st.selectbox("🌍 Negara Trending", list(COUNTRY_CODES.keys()), index=1)
-        cat_name = st.selectbox("Kategori (Opsional)", list(CATEGORIES.keys()))
-        st.caption("Catatan: Trending tidak butuh kata kunci.")
-        
-        btn_trending = st.button("🔥 Lihat Trending", type="primary", use_container_width=True)
-
-    # Reset Stalker
-    if st.session_state.get('stalk_channel'):
-        st.markdown("---")
-        if st.button("❌ Tutup Mode Stalker"):
-            st.session_state.stalk_channel = None
-            st.rerun()
-
-st.title(f"🕵️ Niche Hunter V5.0 ({'Trending' if mode == '🔥 Trending (Viral)' else 'Search'})")
-
-# State Management
-if 'results' not in st.session_state: st.session_state.results = []
-if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = None
-
-# --- LOGIC MODE SEARCH ---
-if mode == "🔍 Pencarian Kata Kunci" and 'btn_cari' in locals() and btn_cari and query:
-    st.session_state.stalk_channel = None 
-    region_code = COUNTRY_CODES[country_name]
-    dur_map = {'Short (<4m)': 'short', 'Medium (4-20m)': 'medium', 'Long (>20m)': 'long'}.get(dur, 'any')
-    cat_id = CATEGORIES[cat_name]
-    pub_after = get_published_after_rfc3339(TIME_FILTERS[time_label])
-    lic_type = LICENSE_OPTIONS[lic_label]
-    sort_api = SORT_OPTIONS[sort_label]
-    
-    with st.spinner(f"Mencari '{query}'..."):
-        st.session_state.results = search_youtube(
-            query=query, region_code=region_code, duration=dur_map,
-            category_id=cat_id, published_after=pub_after,
-            license_type=lic_type, sort_order=sort_api
-        )
-
-# --- LOGIC MODE TRENDING ---
-if mode == "🔥 Trending (Viral)" and 'btn_trending' in locals() and btn_trending:
-    st.session_state.stalk_channel = None
-    region_code = COUNTRY_CODES[country_name]
-    cat_id = CATEGORIES[cat_name]
-    
-    with st.spinner(f"Mengambil data Trending di {country_name}..."):
-        st.session_state.results = get_trending_videos(
-            region_code=region_code, category_id=cat_id
-        )
-
-# --- AREA STALKER (BEDAH CHANNEL) ---
-if st.session_state.stalk_channel:
-    with st.spinner("Sedang membedah channel..."):
-        ch_data = analyze_channel(st.session_state.stalk_channel)
-    if ch_data:
-        st.markdown(f"""
-<div class="stalker-box">
-<div style="display:flex; align-items:center; gap:20px; margin-bottom:20px;">
-<img src="{ch_data['thumb']}" style="border-radius:50%; width:80px; border:3px solid #0ea5e9;">
-<div>
-<h2 style="margin:0; color:white;">{ch_data['title']} <span style="font-size:14px; color:#aaa;">{ch_data['custom_url']}</span></h2>
-<p style="margin:0; color:#ccc;">{ch_data['subs']} Subscribers • {ch_data['video_count']} Videos</p>
-</div>
-</div>
-<div style="display:flex; justify-content:space-around; background:#333; padding:15px; border-radius:10px; margin-bottom:20px;">
-<div class="stalker-stat" style="flex:1;">
-<div style="font-size:24px; font-weight:bold; color:#4ade80;">{ch_data['avg_recent_views']}</div>
-<div style="font-size:12px; color:#aaa;">Rata-rata Views (5 Video Terakhir)</div>
-</div>
-<div class="stalker-stat" style="flex:1; border:none;">
-<div style="font-size:24px; font-weight:bold; color:#facc15;">{ch_data['total_views']}</div>
-<div style="font-size:12px; color:#aaa;">Total Views Seumur Hidup</div>
-</div>
-</div>
-<h4 style="color:white; border-bottom:1px solid #444; padding-bottom:10px;">🎥 5 Upload Terakhir:</h4>
-</div>
-""", unsafe_allow_html=True)
-        sc1, sc2, sc3, sc4, sc5 = st.columns(5)
-        for i, vid in enumerate(ch_data['recent_videos']):
-            with [sc1, sc2, sc3, sc4, sc5][i]:
-                st.image(vid['thumb'], use_container_width=True)
-                st.caption(f"📅 {vid['date']}")
-                st.markdown(f"**👁️ {vid['views']}**")
-                st.markdown(f"<span style='font-size:11px; color:#ccc;'>{vid['title'][:40]}..</span>", unsafe_allow_html=True)
-
-# --- AREA UTAMA (HASIL) ---
-results = st.session_state.results
-
-if results:
-    # Grafik & SEO
-    with st.expander("📊 Analitik Pasar", expanded=False):
-        df = pd.DataFrame(results)
-        c_chart, c_seo = st.columns([2, 1])
-        with c_chart:
-            st.caption("📈 Performa VPH")
-            st.bar_chart(df[['title', 'vph']].set_index('title').head(10))
-        with c_seo:
-            st.caption("🏷️ Top Keywords")
-            all_tags = [t for vid in results for t in vid['tags']]
-            if all_tags:
-                tags_html = "".join([f"<span class='seo-chip'>{t[0]}<span class='seo-count'>{t[1]}</span></span>" for t in Counter(all_tags).most_common(15)])
-                st.markdown(tags_html, unsafe_allow_html=True)
-
-    c_info, c_dl = st.columns([3, 1])
-    with c_info: st.success(f"Menampilkan {len(results)} Video.")
-    with c_dl: st.download_button("💾 CSV", pd.DataFrame(results).to_csv(index=False), "data_riset.csv", "text/csv", use_container_width=True)
-
-    cols = st.columns(3)
-    for i, vid in enumerate(results):
-        with cols[i % 3]:
-            border_color = "2px solid #0ea5e9" if vid['is_gem'] else "1px solid #e5e7eb"
-            
-            # Badge Trending (Jika mode trending)
-            trending_badge = f"<span class='rank-badge'>🔥 Trending #{vid['rank']}</span><br>" if mode == "🔥 Trending (Viral)" else ""
-
-            with st.container(border=True):
-                st.markdown(f"""
-<div style="border: {border_color}; border-radius:8px; padding:5px; margin-bottom:10px;">
-{trending_badge}
-<a href="{vid['link']}" target="_blank">
-<img src="{vid['thumbnail']}" style="width:100%; border-radius:8px; margin-bottom:8px;">
-</a>
-<div class="video-title">{vid["title"]}</div>
-<div class="meta-info" style="margin-bottom:5px;">
-👤 {vid["channel"]} ({vid['subs']} Subs)<br>
-📅 {vid["published_simple"]} • <span class="duration-badge">⏱️ {vid['duration']}</span>
-</div>
-<div style="margin-bottom:8px;">
-<span class="money-badge" title="Estimasi Pendapatan">💰 {vid['earnings']}</span>
-<span class="er-badge" title="Engagement Rate">📈 {vid['er']}%</span>
-<span class="gem-badge" title="Views vs Subs Ratio">💎 {vid['ratio_label']}</span>
-</div>
-<div class="stats-bar">
-<span>👁️ {vid['views_fmt']}</span>
-<span>👍 {vid['likes']}</span>
-<span>💬 {vid['comments']}</span>
-</div>
-<div class="vph-badge">🔥 {vid['vph_fmt']} VPH</div>
-</div>
-""", unsafe_allow_html=True)
-                
-                if st.button("🕵️ Bedah Channel", key=f"stalk_{vid['id']}", use_container_width=True):
-                    st.session_state.stalk_channel = vid['channel_id']
-                    st.rerun()
-
-                with st.expander("🤖 Ringkasan & Download"):
-                    st.caption("📝 **Ringkasan (Auto):**")
-                    if vid['summary'] and vid['summary'] != ["Deskripsi terlalu pendek."]:
-                        summary_html = "".join([f"<span class='summary-bullet'>• {point}</span>" for point in vid['summary']])
-                        st.markdown(f'<div class="desc-box">{summary_html}</div>', unsafe_allow_html=True)
-                    else:
-                        st.markdown(f'<div class="desc-box" style="color:#999;">Tidak ada ringkasan.</div>', unsafe_allow_html=True)
-                    
-                    st.markdown("---")
-                    c_l, c_r = st.columns(2)
-                    with c_l: st.link_button("▶ Tonton", vid['link'], use_container_width=True)
-                    with c_r:
-                        try:
-                            img = requests.get(vid['thumbnail']).content
-                            st.download_button("⬇️ Thumb", img, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
-
-                        except: pass
+        youtube = build('youtube', 'v3', developerKey=Y
