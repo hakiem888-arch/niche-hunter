@@ -9,9 +9,9 @@ from collections import Counter
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V5.1 (Dark)", layout="wide", page_icon="🌙")
+st.set_page_config(page_title="Pro Niche Finder V5.2 (Adaptive)", layout="wide", page_icon="🌗")
 
-# --- API KEY (Mengambil dari Secrets) ---
+# --- API KEY ---
 try:
     YOUTUBE_API_KEY = st.secrets["YOUTUBE_API_KEY"]
 except:
@@ -78,84 +78,73 @@ LICENSE_OPTIONS = {
 }
 
 # ==========================================
-# 3. CUSTOM CSS (FULL DARK MODE)
+# 3. CUSTOM CSS (ADAPTIVE / OTOMATIS)
 # ==========================================
 st.markdown("""
 <style>
-    /* 1. BACKGROUND UTAMA GELAP */
-    .stApp {
-        background-color: #0E1117;
-        color: #FAFAFA;
-    }
-    
-    /* 2. SIDEBAR AGAK TERANG DIKIT */
-    section[data-testid="stSidebar"] {
-        background-color: #262730;
-        border-right: 1px solid #333;
-    }
-    
-    /* 3. KARTU VIDEO (DARK GREY) */
+    /* KARTU VIDEO - Mengikuti Tema Streamlit */
     div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #1E1E1E; /* Warna kartu */
-        border: 1px solid #444;
+        background-color: var(--secondary-background-color); /* Otomatis Putih/Hitam */
+        border: 1px solid rgba(128, 128, 128, 0.2); /* Border halus */
         border-radius: 12px;
         padding: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
     
-    /* 4. TEKS JUDUL PUTIH */
+    /* JUDUL VIDEO - Warna Teks Otomatis */
     .video-title {
         font-family: sans-serif;
         font-weight: 700;
         font-size: 14px;
-        color: #FFFFFF; /* Putih */
+        color: var(--text-color); /* Hitam di Light, Putih di Dark */
         line-height: 1.4;
         height: 40px;
         overflow: hidden;
         margin-bottom: 8px;
     }
     
-    /* 5. TEKS META (ABU-ABU TERANG) */
+    /* META INFO (SUBTEXT) */
     .meta-info {
         font-size: 11px;
-        color: #BBBBBB;
+        color: var(--text-color);
+        opacity: 0.8; /* Agak transparan biar beda sama judul */
         margin-bottom: 8px;
     }
     
-    /* 6. STATS BAR (HITAM) */
+    /* STATS BAR */
     .stats-bar {
         display: flex;
         justify-content: space-between;
-        background: #000000;
+        background-color: var(--background-color); /* Kebalikan dari kartu */
         padding: 6px 10px;
         border-radius: 6px;
         font-size: 12px;
         font-weight: 600;
-        color: #CCCCCC;
+        color: var(--text-color);
         margin-bottom: 8px;
-        border: 1px solid #333;
+        border: 1px solid rgba(128, 128, 128, 0.1);
     }
     
-    /* BADGES (TETAP SAMA TAPI BORDER LEBIH GELAP) */
+    /* BADGES (Warna Tetap Agar Mencolok) */
     .vph-badge {
         background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
         color: white; font-weight: 700; font-size: 13px; text-align: center;
         padding: 6px; border-radius: 6px; margin-top: 5px;
     }
     .money-badge {
-        background-color: #064e3b; color: #6ee7b7; font-weight: bold; /* Hijau Gelap */
+        background-color: #dcfce7; color: #166534; font-weight: bold;
         padding: 3px 6px; border-radius: 4px; font-size: 10px;
-        border: 1px solid #065f46; display: inline-block; margin-right: 3px;
+        border: 1px solid #bbf7d0; display: inline-block; margin-right: 3px;
     }
     .er-badge {
-        background-color: #7c2d12; color: #fdba74; font-weight: bold; /* Oranye Gelap */
+        background-color: #ffedd5; color: #9a3412; font-weight: bold;
         padding: 3px 6px; border-radius: 4px; font-size: 10px;
-        border: 1px solid #9a3412; display: inline-block; margin-right: 3px;
+        border: 1px solid #fed7aa; display: inline-block; margin-right: 3px;
     }
     .gem-badge {
-        background-color: #0c4a6e; color: #7dd3fc; font-weight: bold; /* Biru Gelap */
+        background-color: #e0f2fe; color: #0369a1; font-weight: bold;
         padding: 3px 6px; border-radius: 4px; font-size: 10px;
-        border: 1px solid #075985; display: inline-block;
+        border: 1px solid #bae6fd; display: inline-block;
     }
     .rank-badge {
         background-color: #ef4444; color: white; font-weight: bold;
@@ -163,42 +152,43 @@ st.markdown("""
         display: inline-block; margin-bottom: 5px;
     }
     
-    /* CHIPS & TAGS */
+    /* Elemen Lain */
     .tag-pill {
-        display: inline-block; background: #333; color: #AAA;
+        display: inline-block; background: var(--background-color); color: var(--text-color);
         padding: 2px 8px; border-radius: 10px; font-size: 10px;
-        margin: 2px; border: 1px solid #555;
+        margin: 2px; border: 1px solid rgba(128, 128, 128, 0.2);
     }
     .seo-chip {
-        display: inline-block; background: #333; color: #DDD;
+        display: inline-block; background: var(--secondary-background-color); color: var(--text-color);
         padding: 6px 12px; border-radius: 20px; font-size: 12px;
-        margin: 4px; border: 1px solid #555; font-weight: 500;
+        margin: 4px; border: 1px solid rgba(128, 128, 128, 0.2); font-weight: 500;
     }
     .seo-count {
-        background: #555; padding: 0 5px; border-radius: 4px; 
-        font-size: 10px; font-weight: bold; margin-left: 5px; color: white;
+        background: rgba(128, 128, 128, 0.2); padding: 0 5px; border-radius: 4px; 
+        font-size: 10px; font-weight: bold; margin-left: 5px; color: var(--text-color);
     }
     
-    /* BOX DESKRIPSI */
     .desc-box {
-        font-size: 12px; color: #CCC; background: #222;
-        padding: 10px; border-radius: 6px; border: 1px dashed #555;
+        font-size: 12px; color: var(--text-color); background: var(--background-color);
+        padding: 10px; border-radius: 6px; border: 1px dashed rgba(128, 128, 128, 0.3);
         line-height: 1.5;
     }
     
     .summary-bullet { margin-bottom: 5px; display: block; }
     
     .duration-badge {
-        background-color: rgba(255,255,255,0.2); color: white;
+        background-color: rgba(0,0,0,0.8); color: white;
         padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;
     }
     
+    /* Stalker Box */
     .stalker-box {
-        background-color: #111; color: white; padding: 20px; border-radius: 15px;
-        margin-bottom: 20px; border: 1px solid #444; box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        background-color: var(--secondary-background-color); color: var(--text-color); 
+        padding: 20px; border-radius: 15px; margin-bottom: 20px; 
+        border: 1px solid rgba(128, 128, 128, 0.2);
     }
     .stalker-stat {
-        text-align: center; border-right: 1px solid #444;
+        text-align: center; border-right: 1px solid rgba(128, 128, 128, 0.2);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -469,12 +459,12 @@ with st.sidebar:
             st.session_state.stalk_channel = None
             st.rerun()
 
-st.title(f"🕵️ Niche Hunter V5.1 (Dark Mode)")
+st.title(f"🕵️ Niche Hunter V5.2 (Adaptive)")
 
 if 'results' not in st.session_state: st.session_state.results = []
 if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = None
 
-# LOGIC MODE SEARCH
+# LOGIC SEARCH
 if mode == "🔍 Pencarian Kata Kunci" and 'btn_cari' in locals() and btn_cari and query:
     st.session_state.stalk_channel = None 
     region_code = COUNTRY_CODES[country_name]
@@ -491,7 +481,7 @@ if mode == "🔍 Pencarian Kata Kunci" and 'btn_cari' in locals() and btn_cari a
             license_type=lic_type, sort_order=sort_api
         )
 
-# LOGIC MODE TRENDING
+# LOGIC TRENDING
 if mode == "🔥 Trending (Viral)" and 'btn_trending' in locals() and btn_trending:
     st.session_state.stalk_channel = None
     region_code = COUNTRY_CODES[country_name]
@@ -506,26 +496,27 @@ if st.session_state.stalk_channel:
     with st.spinner("Sedang membedah channel..."):
         ch_data = analyze_channel(st.session_state.stalk_channel)
     if ch_data:
+        # PENTING: Stalker Box juga pakai variable agar adaptive
         st.markdown(f"""
 <div class="stalker-box">
 <div style="display:flex; align-items:center; gap:20px; margin-bottom:20px;">
 <img src="{ch_data['thumb']}" style="border-radius:50%; width:80px; border:3px solid #0ea5e9;">
 <div>
-<h2 style="margin:0; color:white;">{ch_data['title']} <span style="font-size:14px; color:#aaa;">{ch_data['custom_url']}</span></h2>
-<p style="margin:0; color:#ccc;">{ch_data['subs']} Subscribers • {ch_data['video_count']} Videos</p>
+<h2 style="margin:0;">{ch_data['title']} <span style="font-size:14px; opacity:0.7;">{ch_data['custom_url']}</span></h2>
+<p style="margin:0; opacity:0.8;">{ch_data['subs']} Subscribers • {ch_data['video_count']} Videos</p>
 </div>
 </div>
-<div style="display:flex; justify-content:space-around; background:#333; padding:15px; border-radius:10px; margin-bottom:20px;">
+<div style="display:flex; justify-content:space-around; background:rgba(128,128,128,0.1); padding:15px; border-radius:10px; margin-bottom:20px;">
 <div class="stalker-stat" style="flex:1;">
 <div style="font-size:24px; font-weight:bold; color:#4ade80;">{ch_data['avg_recent_views']}</div>
-<div style="font-size:12px; color:#aaa;">Rata-rata Views (5 Video Terakhir)</div>
+<div style="font-size:12px; opacity:0.7;">Rata-rata Views (5 Video Terakhir)</div>
 </div>
 <div class="stalker-stat" style="flex:1; border:none;">
 <div style="font-size:24px; font-weight:bold; color:#facc15;">{ch_data['total_views']}</div>
-<div style="font-size:12px; color:#aaa;">Total Views Seumur Hidup</div>
+<div style="font-size:12px; opacity:0.7;">Total Views Seumur Hidup</div>
 </div>
 </div>
-<h4 style="color:white; border-bottom:1px solid #444; padding-bottom:10px;">🎥 5 Upload Terakhir:</h4>
+<h4 style="border-bottom:1px solid rgba(128,128,128,0.3); padding-bottom:10px;">🎥 5 Upload Terakhir:</h4>
 </div>
 """, unsafe_allow_html=True)
         sc1, sc2, sc3, sc4, sc5 = st.columns(5)
@@ -534,7 +525,7 @@ if st.session_state.stalk_channel:
                 st.image(vid['thumb'], use_container_width=True)
                 st.caption(f"📅 {vid['date']}")
                 st.markdown(f"**👁️ {vid['views']}**")
-                st.markdown(f"<span style='font-size:11px; color:#ccc;'>{vid['title'][:40]}..</span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='font-size:11px; opacity:0.8;'>{vid['title'][:40]}..</span>", unsafe_allow_html=True)
 
 # AREA UTAMA
 results = st.session_state.results
@@ -560,10 +551,9 @@ if results:
     cols = st.columns(3)
     for i, vid in enumerate(results):
         with cols[i % 3]:
-            # Warna Border Kartu
-            border_color = "2px solid #0ea5e9" if vid['is_gem'] else "1px solid #444"
+            # Warna Border: Biru jika Harta Karun, Abu-abu jika biasa (Transparan)
+            border_color = "2px solid #0ea5e9" if vid['is_gem'] else "1px solid rgba(128,128,128,0.2)"
             
-            # Badge Trending
             trending_badge = f"<span class='rank-badge'>🔥 Trending #{vid['rank']}</span><br>" if mode == "🔥 Trending (Viral)" else ""
 
             with st.container(border=True):
@@ -602,7 +592,7 @@ if results:
                         summary_html = "".join([f"<span class='summary-bullet'>• {point}</span>" for point in vid['summary']])
                         st.markdown(f'<div class="desc-box">{summary_html}</div>', unsafe_allow_html=True)
                     else:
-                        st.markdown(f'<div class="desc-box" style="color:#999;">Tidak ada ringkasan.</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="desc-box" style="opacity:0.6;">Tidak ada ringkasan.</div>', unsafe_allow_html=True)
                     
                     st.markdown("---")
                     c_l, c_r = st.columns(2)
