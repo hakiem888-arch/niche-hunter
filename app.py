@@ -12,7 +12,7 @@ from collections import Counter
 st.set_page_config(page_title="Pro Niche Finder V5.0", layout="wide", page_icon="🔥")
 
 # --- API KEY ---
-YOUTUBE_API_KEY = "AIzaSyAl_7aVKlVxCqYbHjNUCXtnmbcYTuUtqw0"
+YOUTUBE_API_KEY = YOUTUBE_API_KEY = st.secrets["YOUTUBE_API_KEY"]
 
 # ==========================================
 # 2. DATA REFERENSI
@@ -596,4 +596,5 @@ if results:
                         try:
                             img = requests.get(vid['thumbnail']).content
                             st.download_button("⬇️ Thumb", img, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
+
                         except: pass
