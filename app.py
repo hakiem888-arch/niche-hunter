@@ -19,13 +19,13 @@ except:
     st.error("API Key YouTube belum disetting di Secrets!")
     st.stop()
 
-# Inisialisasi Gemini AI (Tidak akan error jika belum dipasang, hanya memberi warning nanti)
+# Inisialisasi Gemini AI 
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 # ==========================================
-# 2. DATA REFERENSI
+# 2. DATA REFERENSI LENGKAP
 # ==========================================
 COUNTRY_CODES = {
     "🌍 Global (Semua Negara)": None,
@@ -59,10 +59,12 @@ CATEGORIES = {
     "Pendidikan": "27",
     "Sains & Teknologi": "28"
 }
+
 SORT_OPTIONS = {
     "Relevansi": "relevance",
     "Tanggal Upload (Terbaru)": "date",
     "Jumlah Views": "viewCount",
+    "Rating": "rating",
     "VPH Tertinggi (Custom)": "vph_custom",
     "Golden Ratio (Custom)": "ratio_custom",
     "Skor SEO Terbaik (Custom)": "seo_custom"
@@ -74,6 +76,12 @@ TIME_FILTERS = {
     "Minggu Ini": 7,
     "Bulan Ini": 30,
     "Tahun Ini": 365
+}
+
+LICENSE_OPTIONS = {
+    "Semua Lisensi": None,
+    "Creative Commons": "creativeCommon",
+    "Youtube Standar": "youtube"
 }
 
 # ==========================================
@@ -96,9 +104,13 @@ st.markdown("""
     .seo-badge { background-color: #fce7f3; color: #be185d; font-weight: bold; padding: 3px 6px; border-radius: 4px; font-size: 10px; border: 1px solid #fbcfe8; display: inline-block; margin-bottom: 3px; }
     .rank-badge { background-color: #ef4444; color: white; font-weight: bold; padding: 2px 8px; border-radius: 4px; font-size: 10px; display: inline-block; margin-bottom: 5px; }
     .seo-chip { display: inline-block; background: var(--secondary-background-color); padding: 6px 12px; border-radius: 20px; font-size: 12px; margin: 4px; border: 1px solid rgba(128, 128, 128, 0.2); font-weight: 500; }
-    .seo-count { background: rgba(128, 128, 128, 0.2); padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: bold; margin-left: 5px; }
-    .desc-box { font-size: 12px; background: var(--background-color); padding: 10px; border-radius: 6px; border: 1px dashed rgba(128, 128, 128, 0.3); line-height: 1.5; margin-bottom: 10px; }
+    .seo-count { background: rgba(128, 128, 128, 0.2); padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: bold; margin-left: 5px; color: var(--text-color); }
+    .desc-box { font-size: 12px; background: var(--background-color); padding: 10px; border-radius: 6px; border: 1px dashed rgba(128, 128, 128, 0.3); line-height: 1.5; margin-bottom: 10px; color: var(--text-color);}
+    .summary-bullet { margin-bottom: 5px; display: block; }
+    .duration-badge { background-color: rgba(0,0,0,0.8); color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; }
     .ai-box { background: linear-gradient(145deg, #1e1e2f, #2a2a40); color: #e2e8f0; padding: 20px; border-radius: 12px; border: 1px solid #4f46e5; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(79, 70, 229, 0.2); }
+    .stalker-box { background-color: var(--secondary-background-color); color: var(--text-color); padding: 20px; border-radius: 15px; margin-bottom: 20px; border: 1px solid rgba(128, 128, 128, 0.2); }
+    .stalker-stat { text-align: center; border-right: 1px solid rgba(128, 128, 128, 0.2); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -106,7 +118,6 @@ st.markdown("""
 # 4. FUNGSI LOGIKA (BACKEND)
 # ==========================================
 
-# --- FITUR BARU: AI DAILY IDEAS GENERATOR ---
 def generate_ai_ideas(niche_query):
     if not GEMINI_API_KEY:
         return "⚠️ **Error:** GEMINI_API_KEY belum diisi di Streamlit Secrets. Silakan tambahkan kuncinya terlebih dahulu."
@@ -214,9 +225,25 @@ def get_channel_subs(youtube, channel_ids):
         return subs_map
     except: return {}
 
+def smart_summarize(text):
+    if not text: return ["Tidak ada deskripsi."]
+    clean_text = re.sub(r'http\S+', '', text)
+    lines = clean_text.split('\n')
+    spam_words = ['subscribe', 'follow', 'instagram', 'tiktok', 'donasi', 'saweria', 'copyright', 'business']
+    important_lines = []
+    for line in lines:
+        line = line.strip()
+        lower_line = line.lower()
+        if len(line) > 15 and not any(spam in lower_line for spam in spam_words):
+            important_lines.append(line)
+    if not important_lines:
+        fallback_lines = [line.strip() for line in lines if len(line.strip()) > 5]
+        return fallback_lines[:3] if fallback_lines else ["Deskripsi terlalu pendek."]
+    return important_lines[:4]
+
 def extract_keywords(text):
     words = re.findall(r'\w+', text.lower())
-    common_stops = ['yang', 'dan', 'di', 'ke', 'dari', 'ini', 'itu', 'untuk', 'dengan', 'adalah', 'video', 'saya', 'aku']
+    common_stops = ['yang', 'dan', 'di', 'ke', 'dari', 'ini', 'itu', 'untuk', 'dengan', 'adalah', 'video', 'saya', 'aku', 'the', 'and', 'to', 'of', 'in', 'is', 'for', 'with', 'https', 'http', 'com']
     filtered = [w for w in words if w not in common_stops and len(w) > 3]
     return [item[0] for item in Counter(filtered).most_common(5)]
 
@@ -270,34 +297,46 @@ def process_video_response(items, youtube, region_code):
         subs = subs_map.get(channel_id, 0)
         
         ratio = views / subs if subs > 0 else 0
+        ratio_label = f"{ratio:.1f}x"
+        is_gem = ratio > 1.5
         vph = calculate_vph(snippet['publishedAt'], views)
+        earnings = estimate_earnings(views, region_code)
+        er = calculate_er(views, likes, comments)
         tags = snippet.get('tags', [])[:10]
         desc = snippet.get('description', '')
+        summary_points = smart_summarize(desc)
+        top_keywords = extract_keywords(desc + " " + snippet['title'])
+        thumbnails = snippet['thumbnails']
+        thumb_url = thumbnails.get('maxres', thumbnails.get('high', thumbnails.get('medium')))['url']
+        duration_fmt = parse_duration(content.get('duration', 'PT0S'))
         seo_score, seo_checks = calculate_seo_score(snippet['title'], desc, tags)
 
         results.append({
             'rank': i + 1, 'id': item['id'], 'channel_id': channel_id,
-            'title': snippet['title'], 'thumbnail': snippet['thumbnails'].get('high', snippet['thumbnails'].get('medium'))['url'],
+            'title': snippet['title'], 'thumbnail': thumb_url,
             'channel': snippet['channelTitle'], 'published_simple': snippet['publishedAt'][:10],
-            'duration': parse_duration(content.get('duration', 'PT0S')), 'description': desc[:150]+"...",
+            'duration': duration_fmt, 'description': desc,
+            'summary': summary_points, 'keywords': top_keywords,
             'views': views, 'views_fmt': format_number(views), 'likes': format_number(likes), 'comments': format_number(comments),
-            'vph': vph, 'vph_fmt': f"{vph:,.0f}", 'earnings': estimate_earnings(views, region_code),
-            'er': calculate_er(views, likes, comments), 'subs': format_number(subs),
-            'ratio': ratio, 'ratio_label': f"{ratio:.1f}x", 'is_gem': ratio > 1.5,
+            'vph': vph, 'vph_fmt': f"{vph:,.0f}", 'earnings': earnings,
+            'er': er, 'subs': format_number(subs),
+            'ratio': ratio, 'ratio_label': ratio_label, 'is_gem': is_gem,
             'tags': tags, 'seo_score': seo_score, 'seo_checks': seo_checks,
             'link': f"https://youtu.be/{item['id']}" if isinstance(item['id'], str) else f"https://youtu.be/{item['id']['videoId']}"
         })
     return results
 
-def search_youtube(query, region_code='ID', duration='any', category_id=None, published_after=None, sort_order='relevance', max_results=12):
+def search_youtube(query, region_code='ID', duration='any', category_id=None, published_after=None, license_type=None, sort_order='relevance', max_results=12):
     try:
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
         api_order = 'viewCount' if sort_order in ['vph_custom', 'ratio_custom', 'seo_custom'] else sort_order
         search_params = {'q': query, 'part': 'snippet', 'type': 'video', 'maxResults': max_results, 'order': api_order}
+        
         if region_code: search_params['regionCode'] = region_code
         if duration != 'any': search_params['videoDuration'] = duration
         if category_id: search_params['videoCategoryId'] = category_id
         if published_after: search_params['publishedAfter'] = published_after
+        if license_type: search_params['videoLicense'] = license_type
         
         search_response = youtube.search().list(**search_params).execute()
         video_ids = [item['id']['videoId'] for item in search_response['items']]
@@ -310,7 +349,20 @@ def search_youtube(query, region_code='ID', duration='any', category_id=None, pu
         elif sort_order == 'ratio_custom': return sorted(results, key=lambda x: x['ratio'], reverse=True)
         elif sort_order == 'seo_custom': return sorted(results, key=lambda x: x['seo_score'], reverse=True)
         return results
-    except Exception as e: return []
+    except Exception as e:
+        st.error(f"Error API: {e}")
+        return []
+
+def get_trending_videos(region_code='ID', category_id=None, max_results=12):
+    try:
+        youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
+        params = {'part': 'snippet,statistics,contentDetails', 'chart': 'mostPopular', 'regionCode': region_code, 'maxResults': max_results}
+        if category_id: params['videoCategoryId'] = category_id
+        response = youtube.videos().list(**params).execute()
+        return process_video_response(response['items'], youtube, region_code)
+    except Exception as e:
+        st.error(f"Error API Trending: {e}")
+        return []
 
 # ==========================================
 # 5. UI FRONTEND
@@ -322,26 +374,59 @@ with st.sidebar:
     st.markdown("---")
     
     if mode == "🔍 Pencarian Kata Kunci":
-        query = st.text_input("Kata Kunci", placeholder="Misal: Tutorial Python")
+        st.header("⚙️ Filter Pencarian")
+        query = st.text_input("Kata Kunci", placeholder="Misal: Resep Viral")
         country_name = st.selectbox("🌍 Lokasi Negara", list(COUNTRY_CODES.keys()), index=1)
-        dur = st.selectbox("Durasi", ["Semua", "Short (<4m)", "Medium (4-20m)", "Long (>20m)"])
+        c1, c2 = st.columns(2)
+        with c1: dur = st.selectbox("Durasi", ["Semua", "Short (<4m)", "Medium (4-20m)", "Long (>20m)"])
+        with c2: cat_name = st.selectbox("Kategori", list(CATEGORIES.keys()))
         time_label = st.selectbox("Waktu Publikasi", list(TIME_FILTERS.keys()))
+        lic_label = st.selectbox("Lisensi", list(LICENSE_OPTIONS.keys()))
         sort_label = st.selectbox("Urutkan Berdasarkan", list(SORT_OPTIONS.keys()), index=0)
         btn_cari = st.button("🚀 Cari Video", type="primary", use_container_width=True)
+    
+    else:
+        st.header("⚙️ Filter Trending")
+        country_name = st.selectbox("🌍 Negara Trending", list(COUNTRY_CODES.keys()), index=1)
+        cat_name = st.selectbox("Kategori (Opsional)", list(CATEGORIES.keys()))
+        btn_trending = st.button("🔥 Lihat Trending", type="primary", use_container_width=True)
+
+    if st.session_state.get('stalk_channel'):
+        st.markdown("---")
+        if st.button("❌ Tutup Mode Stalker"):
+            st.session_state.stalk_channel = None
+            st.rerun()
 
 st.title(f"🕵️ Niche Hunter V6.0 (AI Edition)")
 
 if 'results' not in st.session_state: st.session_state.results = []
 if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = None
 
+# LOGIC SEARCH
 if mode == "🔍 Pencarian Kata Kunci" and 'btn_cari' in locals() and btn_cari and query:
     st.session_state.stalk_channel = None 
+    region_code = COUNTRY_CODES[country_name]
     dur_map = {'Short (<4m)': 'short', 'Medium (4-20m)': 'medium', 'Long (>20m)': 'long'}.get(dur, 'any')
+    cat_id = CATEGORIES[cat_name]
+    pub_after = get_published_after_rfc3339(TIME_FILTERS[time_label])
+    lic_type = LICENSE_OPTIONS[lic_label]
+    sort_api = SORT_OPTIONS[sort_label]
+    
     with st.spinner(f"Mencari data untuk '{query}'..."):
         st.session_state.results = search_youtube(
-            query=query, region_code=COUNTRY_CODES[country_name], duration=dur_map,
-            published_after=get_published_after_rfc3339(TIME_FILTERS[time_label]),
-            sort_order=SORT_OPTIONS[sort_label]
+            query=query, region_code=region_code, duration=dur_map,
+            category_id=cat_id, published_after=pub_after,
+            license_type=lic_type, sort_order=sort_api
+        )
+
+# LOGIC TRENDING
+if mode == "🔥 Trending (Viral)" and 'btn_trending' in locals() and btn_trending:
+    st.session_state.stalk_channel = None
+    region_code = COUNTRY_CODES[country_name]
+    cat_id = CATEGORIES[cat_name]
+    with st.spinner(f"Mengambil data Trending di {country_name}..."):
+        st.session_state.results = get_trending_videos(
+            region_code=region_code, category_id=cat_id
         )
 
 # --- BLOK UI AI GENERATOR ---
@@ -355,33 +440,116 @@ if mode == "🔍 Pencarian Kata Kunci" and query:
                 st.markdown(f"<div class='ai-box'>{ai_result}</div>", unsafe_allow_html=True)
     st.markdown("---")
 
+# AREA STALKER
+if st.session_state.stalk_channel:
+    with st.spinner("Sedang membedah channel..."):
+        ch_data = analyze_channel(st.session_state.stalk_channel)
+    if ch_data:
+        st.markdown(f"""
+<div class="stalker-box">
+<div style="display:flex; align-items:center; gap:20px; margin-bottom:20px;">
+<img src="{ch_data['thumb']}" style="border-radius:50%; width:80px; border:3px solid #0ea5e9;">
+<div>
+<h2 style="margin:0;">{ch_data['title']} <span style="font-size:14px; opacity:0.7;">{ch_data['custom_url']}</span></h2>
+<p style="margin:0; opacity:0.8;">{ch_data['subs']} Subscribers • {ch_data['video_count']} Videos</p>
+</div>
+</div>
+<div style="display:flex; justify-content:space-around; background:rgba(128,128,128,0.1); padding:15px; border-radius:10px; margin-bottom:20px;">
+<div class="stalker-stat" style="flex:1;">
+<div style="font-size:24px; font-weight:bold; color:#4ade80;">{ch_data['avg_recent_views']}</div>
+<div style="font-size:12px; opacity:0.7;">Rata-rata Views (5 Video Terakhir)</div>
+</div>
+<div class="stalker-stat" style="flex:1; border:none;">
+<div style="font-size:24px; font-weight:bold; color:#facc15;">{ch_data['total_views']}</div>
+<div style="font-size:12px; opacity:0.7;">Total Views Seumur Hidup</div>
+</div>
+</div>
+<h4 style="border-bottom:1px solid rgba(128,128,128,0.3); padding-bottom:10px;">🎥 5 Upload Terakhir:</h4>
+</div>
+""", unsafe_allow_html=True)
+        sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+        for i, vid in enumerate(ch_data['recent_videos']):
+            with [sc1, sc2, sc3, sc4, sc5][i]:
+                st.image(vid['thumb'], use_container_width=True)
+                st.caption(f"📅 {vid['date']}")
+                st.markdown(f"**👁️ {vid['views']}**")
+                st.markdown(f"<span style='font-size:11px; opacity:0.8;'>{vid['title'][:40]}..</span>", unsafe_allow_html=True)
+
+# AREA UTAMA / HASIL PENCARIAN
 results = st.session_state.results
 
 if results:
-    st.success(f"Berhasil menemukan {len(results)} Video.")
+    with st.expander("📊 Analitik Pasar & SEO Keyword", expanded=False):
+        df = pd.DataFrame(results)
+        c_chart, c_seo = st.columns([2, 1])
+        with c_chart:
+            st.caption("📈 Performa VPH")
+            st.bar_chart(df[['title', 'vph']].set_index('title').head(10))
+        with c_seo:
+            st.caption("🏷️ Top Keywords (vidIQ Style)")
+            all_tags = [t for vid in results for t in vid['tags']]
+            if all_tags:
+                tags_html = "".join([f"<span class='seo-chip'>{t[0]}<span class='seo-count'>{t[1]}</span></span>" for t in Counter(all_tags).most_common(15)])
+                st.markdown(tags_html, unsafe_allow_html=True)
+
+    c_info, c_dl = st.columns([3, 1])
+    with c_info: st.success(f"Menampilkan {len(results)} Video.")
+    with c_dl: st.download_button("💾 CSV", pd.DataFrame(results).to_csv(index=False), "data_riset.csv", "text/csv", use_container_width=True)
+
     cols = st.columns(3)
     for i, vid in enumerate(results):
         with cols[i % 3]:
             border_color = "2px solid #0ea5e9" if vid['is_gem'] else "1px solid rgba(128,128,128,0.2)"
+            trending_badge = f"<span class='rank-badge'>🔥 Trending #{vid['rank']}</span><br>" if mode == "🔥 Trending (Viral)" else ""
+
             with st.container(border=True):
                 st.markdown(f"""
 <div style="border: {border_color}; border-radius:8px; padding:5px; margin-bottom:10px;">
+{trending_badge}
 <a href="{vid['link']}" target="_blank">
 <img src="{vid['thumbnail']}" style="width:100%; border-radius:8px; margin-bottom:8px;">
 </a>
 <div class="video-title">{vid["title"]}</div>
-<div class="meta-info" style="margin-bottom:5px;">👤 {vid["channel"]} ({vid['subs']} Subs)<br>📅 {vid["published_simple"]} • ⏱️ {vid['duration']}</div>
-<div style="margin-bottom:8px;">
-<span class="money-badge">💰 {vid['earnings']}</span>
-<span class="gem-badge">💎 {vid['ratio_label']}</span>
-<span class="seo-badge">🎯 SEO: {vid['seo_score']}</span>
+<div class="meta-info" style="margin-bottom:5px;">
+👤 {vid["channel"]} ({vid['subs']} Subs)<br>
+📅 {vid["published_simple"]} • <span class="duration-badge">⏱️ {vid['duration']}</span>
 </div>
-<div class="stats-bar"><span>👁️ {vid['views_fmt']}</span><span>👍 {vid['likes']}</span><span>💬 {vid['comments']}</span></div>
+<div style="margin-bottom:8px;">
+<span class="money-badge" title="Estimasi Pendapatan">💰 {vid['earnings']}</span>
+<span class="er-badge" title="Engagement Rate">📈 {vid['er']}%</span>
+<span class="gem-badge" title="Views vs Subs Ratio">💎 {vid['ratio_label']}</span>
+<span class="seo-badge" title="Skor Optimasi SEO ala vidIQ">🎯 SEO: {vid['seo_score']}</span>
+</div>
+<div class="stats-bar">
+<span>👁️ {vid['views_fmt']}</span>
+<span>👍 {vid['likes']}</span>
+<span>💬 {vid['comments']}</span>
+</div>
 <div class="vph-badge">🔥 {vid['vph_fmt']} VPH</div>
 </div>
 """, unsafe_allow_html=True)
-                with st.expander("SEO Checklist & Info"):
-                    checks_html = "".join([f"<div style='font-size:12px;'>{check}</div>" for check in vid['seo_checks']])
+                
+                if st.button("🕵️ Bedah Channel", key=f"stalk_{vid['id']}", use_container_width=True):
+                    st.session_state.stalk_channel = vid['channel_id']
+                    st.rerun()
+
+                with st.expander("🤖 Ringkasan & SEO Checklist"):
+                    st.caption("🎯 **vidIQ SEO Checklist:**")
+                    checks_html = "".join([f"<div style='font-size:12px; margin-bottom:4px;'>{check}</div>" for check in vid['seo_checks']])
                     st.markdown(f'<div class="desc-box">{checks_html}</div>', unsafe_allow_html=True)
-                    st.caption("📝 Deskripsi:")
-                    st.markdown(f"<div class='desc-box'>{vid['description']}</div>", unsafe_allow_html=True)
+                    
+                    st.caption("📝 **Ringkasan (Auto):**")
+                    if vid['summary'] and vid['summary'] != ["Deskripsi terlalu pendek."]:
+                        summary_html = "".join([f"<span class='summary-bullet'>• {point}</span>" for point in vid['summary']])
+                        st.markdown(f'<div class="desc-box">{summary_html}</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'<div class="desc-box" style="opacity:0.6;">Tidak ada ringkasan.</div>', unsafe_allow_html=True)
+                    
+                    st.markdown("---")
+                    c_l, c_r = st.columns(2)
+                    with c_l: st.link_button("▶ Tonton", vid['link'], use_container_width=True)
+                    with c_r:
+                        try:
+                            img = requests.get(vid['thumbnail']).content
+                            st.download_button("⬇️ Thumb", img, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
+                        except: pass
