@@ -1,6 +1,5 @@
 import streamlit as st
 from googleapiclient.discovery import build
-import google.generativeai as genai
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import requests
@@ -10,7 +9,7 @@ from collections import Counter
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V6.2 (AI Fixed)", layout="wide", page_icon="🤖")
+st.set_page_config(page_title="Pro Niche Finder V6.3 (API Direct)", layout="wide", page_icon="🤖")
 
 # --- API KEY SETUP ---
 try:
@@ -20,8 +19,6 @@ except:
     st.stop()
 
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 # ==========================================
 # 2. DATA REFERENSI LENGKAP
@@ -83,18 +80,31 @@ st.markdown("""
 # 4. FUNGSI LOGIKA (BACKEND)
 # ==========================================
 
+# --- PERBAIKAN JURUS PAMUNGKAS (API DIRECT) ---
 def generate_ai_ideas(niche_query):
     if not GEMINI_API_KEY: return "⚠️ **Error:** GEMINI_API_KEY belum diisi di Streamlit Secrets."
+    
     prompt = f"""Kamu pakar YouTube SEO dari vidIQ. Buat 5 ide video viral untuk niche: "{niche_query}". 
     Format wajib: 
     ### Ide [Nomor]
     * **💡 Judul Video:** (Clickbait jujur)
     * **🖼️ Konsep Thumbnail:** (Elemen visual, teks, warna kontras)
     * **🔥 Alasan Menang:** (Kenapa disukai algoritma & penonton)"""
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    headers = {'Content-Type': 'application/json'}
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+    
     try:
-        # PERBAIKAN DI SINI: Menggunakan gemini-pro yang lebih stabil di Streamlit
-        return genai.GenerativeModel('gemini-pro').generate_content(prompt).text
-    except Exception as e: return f"❌ Gagal menghasilkan ide dari AI. Error: {e}"
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        result = response.json()
+        return result['candidates'][0]['content']['parts'][0]['text']
+    except Exception as e:
+        error_msg = response.text if 'response' in locals() else str(e)
+        return f"❌ Gagal memanggil AI. Detail: {error_msg}"
 
 def format_number(num):
     if num >= 1000000: return f"{num/1000000:.1f}M"
@@ -293,7 +303,7 @@ with st.sidebar:
             st.session_state.stalk_channel = None
             st.rerun()
 
-st.title(f"🕵️ Niche Hunter V6.2 (AI Fixed)")
+st.title(f"🕵️ Niche Hunter V6.3 (API Direct)")
 
 if 'results' not in st.session_state: st.session_state.results = []
 if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = None
