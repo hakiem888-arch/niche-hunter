@@ -5,13 +5,14 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import requests
 import re
+import urllib.parse
 from collections import Counter
-from pytrends.request import TrendReq # <-- Import baru untuk Google Trends
+from pytrends.request import TrendReq
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V7.0 (Ultimate)", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Pro Niche Finder V7.1 (Trends Bypass)", layout="wide", page_icon="🚀")
 
 # --- API KEY SETUP ---
 try:
@@ -75,8 +76,6 @@ st.markdown("""
     .ai-box { background: linear-gradient(145deg, #1e1e2f, #2a2a40); color: #e2e8f0; padding: 20px; border-radius: 12px; border: 1px solid #4f46e5; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(79, 70, 229, 0.2); }
     .stalker-box { background-color: var(--secondary-background-color); color: var(--text-color); padding: 20px; border-radius: 15px; margin-bottom: 20px; border: 1px solid rgba(128, 128, 128, 0.2); }
     .stalker-stat { text-align: center; border-right: 1px solid rgba(128, 128, 128, 0.2); }
-    
-    /* Styling khusus untuk Insight Box baru */
     .insight-box { background-color: rgba(14, 165, 233, 0.1); border-left: 4px solid #0ea5e9; padding: 15px; border-radius: 0 8px 8px 0; margin-bottom: 15px; }
     .insight-title { font-weight: bold; color: #0ea5e9; margin-bottom: 5px; display: flex; align-items: center; gap: 8px; }
 </style>
@@ -86,43 +85,34 @@ st.markdown("""
 # 4. FUNGSI LOGIKA (BACKEND)
 # ==========================================
 
-# --- FITUR BARU 1: BEST TIME TO POST ESTIMATOR ---
 def estimate_best_time(results):
     if not results: return "Data tidak cukup"
     times = []
     for r in results:
         try:
-            # Mengambil waktu ISO dari API dan konversi langsung ke UTC+7 (WIB)
             dt = datetime.strptime(r['published_full'], "%Y-%m-%dT%H:%M:%SZ")
             dt = dt + timedelta(hours=7) 
             times.append(dt)
         except: pass
         
     if not times: return "Data tidak cukup"
-    
     days_indo = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
     day_counts = Counter([days_indo[t.weekday()] for t in times])
     hour_counts = Counter([t.hour for t in times])
-    
-    best_day = day_counts.most_common(1)[0][0]
-    best_hour = hour_counts.most_common(1)[0][0]
-    
-    return f"{best_day}, pukul {best_hour:02d}:00 WIB"
+    return f"{day_counts.most_common(1)[0][0]}, pukul {hour_counts.most_common(1)[0][0]:02d}:00 WIB"
 
-# --- FITUR BARU 2: GOOGLE TRENDS RISING KEYWORDS ---
 def get_rising_trends(query, geo='ID'):
     try:
-        # Konfigurasi pytrends untuk fokus ke pencarian YouTube
-        pytrend = TrendReq(hl='id-ID', tz=420) 
+        # Menambahkan retries agar sedikit lebih tahan banting
+        pytrend = TrendReq(hl='id-ID', tz=420, retries=3, backoff_factor=1) 
         pytrend.build_payload(kw_list=[query], timeframe='now 7-d', geo=geo if geo else '', gprop='youtube')
         data = pytrend.related_queries()
         
         if query in data and data[query]['rising'] is not None:
-            rising_df = data[query]['rising'].head(8) # Ambil 8 teratas
-            return rising_df.to_dict('records')
+            return data[query]['rising'].head(8).to_dict('records')
         return []
     except Exception as e:
-        return None # Return None jika limit API Google Trends tercapai
+        return None 
 
 def generate_ai_ideas(niche_query):
     if not GEMINI_API_KEY: return "⚠️ **Error:** GEMINI_API_KEY belum diisi di Streamlit Secrets."
@@ -248,7 +238,7 @@ def process_video_response(items, youtube, region_code):
                 'rank': i + 1, 'id': video_id, 'channel_id': snippet.get('channelId', ''),
                 'title': snippet.get('title', 'Untitled'), 'thumbnail': best_thumb.get('url', ''),
                 'channel': snippet.get('channelTitle', 'Unknown'), 
-                'published_full': snippet.get('publishedAt', ''), # Disimpan untuk kalkulasi jam tayang
+                'published_full': snippet.get('publishedAt', ''),
                 'published_simple': snippet.get('publishedAt', '')[:10],
                 'duration': parse_duration(content.get('duration', 'PT0S')), 'description': desc,
                 'summary': smart_summarize(desc), 'keywords': extract_keywords(desc + " " + snippet.get('title', '')),
@@ -334,7 +324,7 @@ with st.sidebar:
             st.session_state.stalk_channel = None
             st.rerun()
 
-st.title(f"🕵️ Niche Hunter V7.0 (Ultimate)")
+st.title(f"🕵️ Niche Hunter V7.1 (Trends Bypass)")
 
 if 'results' not in st.session_state: st.session_state.results = []
 if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = None
@@ -354,7 +344,7 @@ if mode == "🔍 Pencarian Kata Kunci" and 'btn_cari' in locals() and btn_cari a
         )
         st.session_state.best_time = estimate_best_time(st.session_state.results)
         
-    with st.spinner("Menganalisis Google Trends (Bisa memakan waktu beberapa detik)..."):
+    with st.spinner("Menganalisis Google Trends..."):
         st.session_state.rising_trends = get_rising_trends(query, COUNTRY_CODES[country_name])
 
 # LOGIC TRENDING
@@ -405,7 +395,6 @@ results = st.session_state.results
 if results:
     with st.expander("📊 Dasbor Analitik Pasar & SEO (vidIQ Style)", expanded=True):
         
-        # --- UI BARU: BEST TIME & RISING TRENDS ---
         c_insight1, c_insight2 = st.columns(2)
         with c_insight1:
             st.markdown(f"""
@@ -418,8 +407,17 @@ if results:
             
         with c_insight2:
             st.markdown(f"""<div class="insight-title" style="margin-bottom:10px;">📈 Google Trends: Rising Keywords (YouTube)</div>""", unsafe_allow_html=True)
+            
+            # --- LOGIKA FALLBACK BARU ---
             if st.session_state.rising_trends is None:
-                st.warning("⚠️ Limit API Google Trends harian tercapai atau data tidak ditemukan. Coba lagi nanti.")
+                # Jika diblokir, buat link langsung ke Google Trends
+                encoded_query = urllib.parse.quote(query)
+                geo_code = COUNTRY_CODES[country_name] if COUNTRY_CODES[country_name] else ''
+                trends_url = f"https://trends.google.com/trends/explore?date=now%207-d&gprop=youtube&q={encoded_query}&geo={geo_code}"
+                
+                st.warning("⚠️ Server Streamlit sedang dibatasi oleh sistem Google Trends.")
+                st.link_button("📊 Cek Manual Langsung di Google Trends", trends_url, use_container_width=True)
+            
             elif not st.session_state.rising_trends:
                 st.info("ℹ️ Tidak ada lonjakan tren signifikan untuk kata kunci ini dalam 7 hari terakhir.")
             else:
