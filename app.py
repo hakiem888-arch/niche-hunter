@@ -32,20 +32,33 @@ COUNTRY_CODES = {
     "🇮🇩 Indonesia": "ID",
     "🇺🇸 Amerika Serikat (US)": "US",
     "🇲🇾 Malaysia": "MY",
-    "🇸🇬 Singapura": "SG"
+    "🇸🇬 Singapura": "SG",
+    "🇯🇵 Jepang": "JP",
+    "🇰🇷 Korea Selatan": "KR",
+    "🇬🇧 Inggris (UK)": "GB",
+    "🇦🇺 Australia": "AU",
+    "🇨🇦 Kanada": "CA",
+    "🇸🇦 Arab Saudi": "SA",
+    "🇹🇭 Thailand": "TH"
 }
 
 CATEGORIES = {
     "Semua Kategori": None,
     "Film & Animasi": "1",
+    "Otomotif": "2",
     "Musik": "10",
+    "Hewan & Peliharaan": "15",
+    "Olahraga": "17",
+    "Travel & Acara": "19",
     "Gaming": "20",
     "Orang & Blog": "22",
+    "Komedi": "23",
     "Hiburan": "24",
+    "Berita & Politik": "25",
     "How-to & Gaya": "26",
+    "Pendidikan": "27",
     "Sains & Teknologi": "28"
 }
-
 SORT_OPTIONS = {
     "Relevansi": "relevance",
     "Tanggal Upload (Terbaru)": "date",
