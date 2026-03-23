@@ -91,7 +91,7 @@ def generate_ai_ideas(niche_query):
     * **🖼️ Konsep Thumbnail:** (Elemen visual, teks, warna kontras)
     * **🔥 Alasan Menang:** (Kenapa disukai algoritma & penonton)"""
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {'Content-Type': 'application/json'}
     data = {
         "contents": [{"parts": [{"text": prompt}]}]
