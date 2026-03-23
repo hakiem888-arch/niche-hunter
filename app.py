@@ -10,7 +10,7 @@ from collections import Counter
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V6.1 (Anti-Badai)", layout="wide", page_icon="🤖")
+st.set_page_config(page_title="Pro Niche Finder V6.2 (AI Fixed)", layout="wide", page_icon="🤖")
 
 # --- API KEY SETUP ---
 try:
@@ -92,7 +92,8 @@ def generate_ai_ideas(niche_query):
     * **🖼️ Konsep Thumbnail:** (Elemen visual, teks, warna kontras)
     * **🔥 Alasan Menang:** (Kenapa disukai algoritma & penonton)"""
     try:
-        return genai.GenerativeModel('gemini-1.5-flash').generate_content(prompt).text
+        # PERBAIKAN DI SINI: Menggunakan gemini-pro yang lebih stabil di Streamlit
+        return genai.GenerativeModel('gemini-pro').generate_content(prompt).text
     except Exception as e: return f"❌ Gagal menghasilkan ide dari AI. Error: {e}"
 
 def format_number(num):
@@ -177,7 +178,6 @@ def analyze_channel(channel_id):
         }
     except: return None
 
-# FIX UTAMA: ANTI BADAI ERROR HANDLING DI SINI
 def process_video_response(items, youtube, region_code):
     channel_ids = list(set([item['snippet']['channelId'] for item in items]))
     subs_map = get_channel_subs(youtube, channel_ids)
@@ -218,7 +218,6 @@ def process_video_response(items, youtube, region_code):
                 'link': f"https://youtu.be/{video_id}"
             })
         except Exception as e:
-            # Jika 1 video gagal diekstrak, lompati dan lanjut ke video berikutnya
             continue 
             
     return results
@@ -278,7 +277,6 @@ with st.sidebar:
         time_label = st.selectbox("Waktu Publikasi", list(TIME_FILTERS.keys()))
         lic_label = st.selectbox("Lisensi", list(LICENSE_OPTIONS.keys()))
         sort_label = st.selectbox("Urutkan Berdasarkan", list(SORT_OPTIONS.keys()), index=0)
-        # FITUR BARU: BISA ATUR JUMLAH PENCARIAN
         max_res = st.slider("Jumlah Video Ditampilkan", min_value=5, max_value=50, value=12, step=1)
         btn_cari = st.button("🚀 Cari Video", type="primary", use_container_width=True)
     
@@ -295,7 +293,7 @@ with st.sidebar:
             st.session_state.stalk_channel = None
             st.rerun()
 
-st.title(f"🕵️ Niche Hunter V6.1 (Anti-Badai)")
+st.title(f"🕵️ Niche Hunter V6.2 (AI Fixed)")
 
 if 'results' not in st.session_state: st.session_state.results = []
 if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = None
