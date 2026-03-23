@@ -9,7 +9,7 @@ from collections import Counter
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V5.2 (Adaptive)", layout="wide", page_icon="🌗")
+st.set_page_config(page_title="Pro Niche Finder V5.3 (vidIQ Edition)", layout="wide", page_icon="🌗")
 
 # --- API KEY ---
 try:
@@ -60,7 +60,8 @@ SORT_OPTIONS = {
     "Jumlah Views": "viewCount",
     "Rating": "rating",
     "VPH Tertinggi (Custom)": "vph_custom",
-    "Golden Ratio (Custom)": "ratio_custom"
+    "Golden Ratio (Custom)": "ratio_custom",
+    "Skor SEO Terbaik (Custom)": "seo_custom"
 }
 
 TIME_FILTERS = {
@@ -82,40 +83,37 @@ LICENSE_OPTIONS = {
 # ==========================================
 st.markdown("""
 <style>
-    /* KARTU VIDEO - Mengikuti Tema Streamlit */
+    /* KARTU VIDEO */
     div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: var(--secondary-background-color); /* Otomatis Putih/Hitam */
-        border: 1px solid rgba(128, 128, 128, 0.2); /* Border halus */
+        background-color: var(--secondary-background-color);
+        border: 1px solid rgba(128, 128, 128, 0.2);
         border-radius: 12px;
         padding: 15px;
         box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
     
-    /* JUDUL VIDEO - Warna Teks Otomatis */
     .video-title {
         font-family: sans-serif;
         font-weight: 700;
         font-size: 14px;
-        color: var(--text-color); /* Hitam di Light, Putih di Dark */
+        color: var(--text-color);
         line-height: 1.4;
         height: 40px;
         overflow: hidden;
         margin-bottom: 8px;
     }
     
-    /* META INFO (SUBTEXT) */
     .meta-info {
         font-size: 11px;
         color: var(--text-color);
-        opacity: 0.8; /* Agak transparan biar beda sama judul */
+        opacity: 0.8;
         margin-bottom: 8px;
     }
     
-    /* STATS BAR */
     .stats-bar {
         display: flex;
         justify-content: space-between;
-        background-color: var(--background-color); /* Kebalikan dari kartu */
+        background-color: var(--background-color);
         padding: 6px 10px;
         border-radius: 6px;
         font-size: 12px;
@@ -125,7 +123,7 @@ st.markdown("""
         border: 1px solid rgba(128, 128, 128, 0.1);
     }
     
-    /* BADGES (Warna Tetap Agar Mencolok) */
+    /* BADGES */
     .vph-badge {
         background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
         color: white; font-weight: 700; font-size: 13px; text-align: center;
@@ -134,17 +132,22 @@ st.markdown("""
     .money-badge {
         background-color: #dcfce7; color: #166534; font-weight: bold;
         padding: 3px 6px; border-radius: 4px; font-size: 10px;
-        border: 1px solid #bbf7d0; display: inline-block; margin-right: 3px;
+        border: 1px solid #bbf7d0; display: inline-block; margin-right: 3px; margin-bottom: 3px;
     }
     .er-badge {
         background-color: #ffedd5; color: #9a3412; font-weight: bold;
         padding: 3px 6px; border-radius: 4px; font-size: 10px;
-        border: 1px solid #fed7aa; display: inline-block; margin-right: 3px;
+        border: 1px solid #fed7aa; display: inline-block; margin-right: 3px; margin-bottom: 3px;
     }
     .gem-badge {
         background-color: #e0f2fe; color: #0369a1; font-weight: bold;
         padding: 3px 6px; border-radius: 4px; font-size: 10px;
-        border: 1px solid #bae6fd; display: inline-block;
+        border: 1px solid #bae6fd; display: inline-block; margin-right: 3px; margin-bottom: 3px;
+    }
+    .seo-badge {
+        background-color: #fce7f3; color: #be185d; font-weight: bold;
+        padding: 3px 6px; border-radius: 4px; font-size: 10px;
+        border: 1px solid #fbcfe8; display: inline-block; margin-bottom: 3px;
     }
     .rank-badge {
         background-color: #ef4444; color: white; font-weight: bold;
@@ -153,11 +156,6 @@ st.markdown("""
     }
     
     /* Elemen Lain */
-    .tag-pill {
-        display: inline-block; background: var(--background-color); color: var(--text-color);
-        padding: 2px 8px; border-radius: 10px; font-size: 10px;
-        margin: 2px; border: 1px solid rgba(128, 128, 128, 0.2);
-    }
     .seo-chip {
         display: inline-block; background: var(--secondary-background-color); color: var(--text-color);
         padding: 6px 12px; border-radius: 20px; font-size: 12px;
@@ -171,7 +169,7 @@ st.markdown("""
     .desc-box {
         font-size: 12px; color: var(--text-color); background: var(--background-color);
         padding: 10px; border-radius: 6px; border: 1px dashed rgba(128, 128, 128, 0.3);
-        line-height: 1.5;
+        line-height: 1.5; margin-bottom: 10px;
     }
     
     .summary-bullet { margin-bottom: 5px; display: block; }
@@ -236,6 +234,38 @@ def calculate_er(views, likes, comments):
     if views == 0: return 0
     interactions = likes + comments
     return round((interactions / views) * 100, 2)
+
+# --- FITUR BARU: ALGORITMA SKOR SEO VIDIQ ---
+def calculate_seo_score(title, desc, tags):
+    score = 0
+    checks = []
+    
+    # 1. Analisis Panjang Judul
+    if 20 <= len(title) <= 60:
+        score += 40
+        checks.append("✅ Panjang Judul Ideal (20-60 karakter)")
+    else:
+        score += 20
+        checks.append(f"❌ Judul Kurang Optimal ({len(title)} karakter)")
+        
+    # 2. Analisis Deskripsi
+    if len(desc) > 200:
+        score += 30
+        checks.append("✅ Deskripsi Panjang & Informatif")
+    elif len(desc) > 0:
+        score += 10
+        checks.append("❌ Deskripsi Terlalu Pendek")
+    else:
+        checks.append("❌ Tidak Ada Deskripsi")
+        
+    # 3. Analisis Penggunaan Tag
+    if tags and len(tags) >= 3:
+        score += 30
+        checks.append(f"✅ Menggunakan Tags ({len(tags)} tags terdeteksi)")
+    else:
+        checks.append("❌ Minim / Tidak Ada Tags")
+        
+    return score, checks
 
 def get_published_after_rfc3339(days):
     if days is None: return None
@@ -343,6 +373,9 @@ def process_video_response(items, youtube, region_code):
         thumbnails = snippet['thumbnails']
         thumb_url = thumbnails.get('maxres', thumbnails.get('high', thumbnails.get('medium')))['url']
         duration_fmt = parse_duration(content.get('duration', 'PT0S'))
+        
+        # Eksekusi Fungsi Penilaian SEO vidIQ
+        seo_score, seo_checks = calculate_seo_score(snippet['title'], desc, tags)
 
         results.append({
             'rank': i + 1,
@@ -369,6 +402,8 @@ def process_video_response(items, youtube, region_code):
             'ratio_label': ratio_label,
             'is_gem': is_gem,
             'tags': tags,
+            'seo_score': seo_score,
+            'seo_checks': seo_checks,
             'link': f"https://youtu.be/{item['id']}" if isinstance(item['id'], str) else f"https://youtu.be/{item['id']['videoId']}"
         })
     return results
@@ -379,7 +414,7 @@ def search_youtube(query, region_code='ID', duration='any',
     try:
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
         api_order = sort_order
-        if sort_order in ['vph_custom', 'ratio_custom']: api_order = 'viewCount' 
+        if sort_order in ['vph_custom', 'ratio_custom', 'seo_custom']: api_order = 'viewCount' 
 
         search_params = {
             'q': query, 'part': 'snippet', 'type': 'video',
@@ -405,6 +440,7 @@ def search_youtube(query, region_code='ID', duration='any',
         
         if sort_order == 'vph_custom': return sorted(results, key=lambda x: x['vph'], reverse=True)
         elif sort_order == 'ratio_custom': return sorted(results, key=lambda x: x['ratio'], reverse=True)
+        elif sort_order == 'seo_custom': return sorted(results, key=lambda x: x['seo_score'], reverse=True)
         return results
     except Exception as e:
         st.error(f"Error API: {e}")
@@ -459,7 +495,7 @@ with st.sidebar:
             st.session_state.stalk_channel = None
             st.rerun()
 
-st.title(f"🕵️ Niche Hunter V5.2 (Adaptive)")
+st.title(f"🕵️ Niche Hunter V5.3 (vidIQ Edition)")
 
 if 'results' not in st.session_state: st.session_state.results = []
 if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = None
@@ -496,7 +532,6 @@ if st.session_state.stalk_channel:
     with st.spinner("Sedang membedah channel..."):
         ch_data = analyze_channel(st.session_state.stalk_channel)
     if ch_data:
-        # PENTING: Stalker Box juga pakai variable agar adaptive
         st.markdown(f"""
 <div class="stalker-box">
 <div style="display:flex; align-items:center; gap:20px; margin-bottom:20px;">
@@ -531,14 +566,14 @@ if st.session_state.stalk_channel:
 results = st.session_state.results
 
 if results:
-    with st.expander("📊 Analitik Pasar", expanded=False):
+    with st.expander("📊 Analitik Pasar & SEO Keyword", expanded=False):
         df = pd.DataFrame(results)
         c_chart, c_seo = st.columns([2, 1])
         with c_chart:
             st.caption("📈 Performa VPH")
             st.bar_chart(df[['title', 'vph']].set_index('title').head(10))
         with c_seo:
-            st.caption("🏷️ Top Keywords")
+            st.caption("🏷️ Top Keywords (vidIQ Style)")
             all_tags = [t for vid in results for t in vid['tags']]
             if all_tags:
                 tags_html = "".join([f"<span class='seo-chip'>{t[0]}<span class='seo-count'>{t[1]}</span></span>" for t in Counter(all_tags).most_common(15)])
@@ -551,9 +586,7 @@ if results:
     cols = st.columns(3)
     for i, vid in enumerate(results):
         with cols[i % 3]:
-            # Warna Border: Biru jika Harta Karun, Abu-abu jika biasa (Transparan)
             border_color = "2px solid #0ea5e9" if vid['is_gem'] else "1px solid rgba(128,128,128,0.2)"
-            
             trending_badge = f"<span class='rank-badge'>🔥 Trending #{vid['rank']}</span><br>" if mode == "🔥 Trending (Viral)" else ""
 
             with st.container(border=True):
@@ -572,6 +605,7 @@ if results:
 <span class="money-badge" title="Estimasi Pendapatan">💰 {vid['earnings']}</span>
 <span class="er-badge" title="Engagement Rate">📈 {vid['er']}%</span>
 <span class="gem-badge" title="Views vs Subs Ratio">💎 {vid['ratio_label']}</span>
+<span class="seo-badge" title="Skor Optimasi SEO ala vidIQ">🎯 SEO: {vid['seo_score']}</span>
 </div>
 <div class="stats-bar">
 <span>👁️ {vid['views_fmt']}</span>
@@ -586,7 +620,12 @@ if results:
                     st.session_state.stalk_channel = vid['channel_id']
                     st.rerun()
 
-                with st.expander("🤖 Ringkasan & Download"):
+                with st.expander("🤖 Ringkasan & SEO Checklist"):
+                    # Fitur Baru: SEO Checklist
+                    st.caption("🎯 **vidIQ SEO Checklist:**")
+                    checks_html = "".join([f"<div style='font-size:12px; margin-bottom:4px;'>{check}</div>" for check in vid['seo_checks']])
+                    st.markdown(f'<div class="desc-box">{checks_html}</div>', unsafe_allow_html=True)
+                    
                     st.caption("📝 **Ringkasan (Auto):**")
                     if vid['summary'] and vid['summary'] != ["Deskripsi terlalu pendek."]:
                         summary_html = "".join([f"<span class='summary-bullet'>• {point}</span>" for point in vid['summary']])
