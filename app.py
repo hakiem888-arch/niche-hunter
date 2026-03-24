@@ -6,13 +6,14 @@ import pandas as pd
 import requests
 import re
 import urllib.parse
+import json
 from collections import Counter
 from pytrends.request import TrendReq
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V7.1 (Trends Bypass)", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Pro Niche Finder V7.2 (Suggester)", layout="wide", page_icon="🚀")
 
 # --- API KEY SETUP ---
 try:
@@ -78,12 +79,30 @@ st.markdown("""
     .stalker-stat { text-align: center; border-right: 1px solid rgba(128, 128, 128, 0.2); }
     .insight-box { background-color: rgba(14, 165, 233, 0.1); border-left: 4px solid #0ea5e9; padding: 15px; border-radius: 0 8px 8px 0; margin-bottom: 15px; }
     .insight-title { font-weight: bold; color: #0ea5e9; margin-bottom: 5px; display: flex; align-items: center; gap: 8px; }
+    
+    /* CSS Khusus Tombol Suggestion */
+    .stButton > button[kind="secondary"] { border-radius: 20px; padding: 2px 12px; font-size: 12px; border: 1px solid #0ea5e9; color: #0ea5e9; background: transparent; }
+    .stButton > button[kind="secondary"]:hover { background: rgba(14, 165, 233, 0.1); }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
 # 4. FUNGSI LOGIKA (BACKEND)
 # ==========================================
+
+# --- FITUR BARU 3: YOUTUBE AUTOCOMPLETE SUGGESTION ---
+def get_youtube_suggestions(query):
+    if not query or len(query) < 2: return []
+    try:
+        # Menggunakan endpoint rahasia autocomplete YouTube
+        url = f"http://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={urllib.parse.quote(query)}"
+        response = requests.get(url, timeout=3)
+        if response.status_code == 200:
+            data = json.loads(response.text)
+            return data[1][:10] # Ambil maksimal 10 saran teratas
+        return []
+    except:
+        return []
 
 def estimate_best_time(results):
     if not results: return "Data tidak cukup"
@@ -103,16 +122,13 @@ def estimate_best_time(results):
 
 def get_rising_trends(query, geo='ID'):
     try:
-        # Menambahkan retries agar sedikit lebih tahan banting
         pytrend = TrendReq(hl='id-ID', tz=420, retries=3, backoff_factor=1) 
         pytrend.build_payload(kw_list=[query], timeframe='now 7-d', geo=geo if geo else '', gprop='youtube')
         data = pytrend.related_queries()
-        
         if query in data and data[query]['rising'] is not None:
             return data[query]['rising'].head(8).to_dict('records')
         return []
-    except Exception as e:
-        return None 
+    except Exception as e: return None 
 
 def generate_ai_ideas(niche_query):
     if not GEMINI_API_KEY: return "⚠️ **Error:** GEMINI_API_KEY belum diisi di Streamlit Secrets."
@@ -293,6 +309,10 @@ def get_trending_videos(region_code='ID', category_id=None, max_results=12):
 # 5. UI FRONTEND
 # ==========================================
 
+# --- VARIABEL STATE UNTUK INPUT KEYWORD ---
+if 'search_query' not in st.session_state: st.session_state.search_query = ""
+if 'suggestions' not in st.session_state: st.session_state.suggestions = []
+
 with st.sidebar:
     st.title("🎛️ Menu Navigasi")
     mode = st.radio("Pilih Mode:", ["🔍 Pencarian Kata Kunci", "🔥 Trending (Viral)"])
@@ -300,7 +320,32 @@ with st.sidebar:
     
     if mode == "🔍 Pencarian Kata Kunci":
         st.header("⚙️ Filter Pencarian")
-        query = st.text_input("Kata Kunci", placeholder="Misal: Live Streaming Setup")
+        
+        # --- BLOK UI SUGGESTION KEYWORD ---
+        col_input, col_btn = st.columns([4, 1])
+        with col_input:
+            query_input = st.text_input("Kata Kunci", value=st.session_state.search_query, placeholder="Misal: ASMR Rain", key="q_input")
+        with col_btn:
+            st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+            if st.button("💡", help="Klik untuk memunculkan ide Autocomplete dari YouTube"):
+                if query_input:
+                    with st.spinner("Mencari saran..."):
+                        st.session_state.suggestions = get_youtube_suggestions(query_input)
+                        st.session_state.search_query = query_input
+                        st.rerun()
+
+        if st.session_state.suggestions:
+            st.caption("Pilih saran kata kunci (Autocomplete):")
+            sug_cols = st.columns(3)
+            for idx, sug in enumerate(st.session_state.suggestions):
+                with sug_cols[idx % 3]:
+                    if st.button(sug, key=f"sug_{idx}", use_container_width=True, type="secondary"):
+                        st.session_state.search_query = sug
+                        st.session_state.suggestions = [] # Bersihkan saran setelah diklik
+                        st.rerun()
+            st.markdown("<div style='margin-bottom:15px;'></div>", unsafe_allow_html=True)
+        # ----------------------------------
+
         country_name = st.selectbox("🌍 Lokasi Negara", list(COUNTRY_CODES.keys()), index=1)
         c1, c2 = st.columns(2)
         with c1: dur = st.selectbox("Durasi", ["Semua", "Short (<4m)", "Medium (4-20m)", "Long (>20m)"])
@@ -309,6 +354,7 @@ with st.sidebar:
         lic_label = st.selectbox("Lisensi", list(LICENSE_OPTIONS.keys()))
         sort_label = st.selectbox("Urutkan Berdasarkan", list(SORT_OPTIONS.keys()), index=0)
         max_res = st.slider("Jumlah Video Ditampilkan", min_value=5, max_value=50, value=12, step=1)
+        
         btn_cari = st.button("🚀 Cari Video", type="primary", use_container_width=True)
     
     else:
@@ -324,7 +370,7 @@ with st.sidebar:
             st.session_state.stalk_channel = None
             st.rerun()
 
-st.title(f"🕵️ Niche Hunter V7.1 (Trends Bypass)")
+st.title(f"🕵️ Niche Hunter V7.2 (Suggester)")
 
 if 'results' not in st.session_state: st.session_state.results = []
 if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = None
@@ -332,20 +378,20 @@ if 'best_time' not in st.session_state: st.session_state.best_time = None
 if 'rising_trends' not in st.session_state: st.session_state.rising_trends = None
 
 # LOGIC SEARCH & TRENDS
-if mode == "🔍 Pencarian Kata Kunci" and 'btn_cari' in locals() and btn_cari and query:
+if mode == "🔍 Pencarian Kata Kunci" and 'btn_cari' in locals() and btn_cari and st.session_state.search_query:
     st.session_state.stalk_channel = None 
     dur_map = {'Short (<4m)': 'short', 'Medium (4-20m)': 'medium', 'Long (>20m)': 'long'}.get(dur, 'any')
     
-    with st.spinner(f"Mencari data video untuk '{query}'..."):
+    with st.spinner(f"Mencari data video untuk '{st.session_state.search_query}'..."):
         st.session_state.results = search_youtube(
-            query=query, region_code=COUNTRY_CODES[country_name], duration=dur_map,
+            query=st.session_state.search_query, region_code=COUNTRY_CODES[country_name], duration=dur_map,
             category_id=CATEGORIES[cat_name], published_after=get_published_after_rfc3339(TIME_FILTERS[time_label]),
             license_type=LICENSE_OPTIONS[lic_label], sort_order=SORT_OPTIONS[sort_label], max_results=max_res
         )
         st.session_state.best_time = estimate_best_time(st.session_state.results)
         
     with st.spinner("Menganalisis Google Trends..."):
-        st.session_state.rising_trends = get_rising_trends(query, COUNTRY_CODES[country_name])
+        st.session_state.rising_trends = get_rising_trends(st.session_state.search_query, COUNTRY_CODES[country_name])
 
 # LOGIC TRENDING
 if mode == "🔥 Trending (Viral)" and 'btn_trending' in locals() and btn_trending:
@@ -358,13 +404,13 @@ if mode == "🔥 Trending (Viral)" and 'btn_trending' in locals() and btn_trendi
         st.session_state.rising_trends = None
 
 # --- BLOK UI AI GENERATOR ---
-if mode == "🔍 Pencarian Kata Kunci" and query:
+if mode == "🔍 Pencarian Kata Kunci" and st.session_state.search_query:
     st.markdown("---")
     with st.expander("✨🤖 AI Daily Ideas: Generate Ide Konten Fresh!", expanded=False):
-        st.markdown(f"Minta AI memikirkan ide video *out-of-the-box* berdasarkan kata kunci: **{query}**")
+        st.markdown(f"Minta AI memikirkan ide video *out-of-the-box* berdasarkan kata kunci: **{st.session_state.search_query}**")
         if st.button("💡 Generate 5 Ide Viral", type="primary"):
             with st.spinner("AI sedang memutar otak menganalisis algoritma..."):
-                st.markdown(f"<div class='ai-box'>{generate_ai_ideas(query)}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='ai-box'>{generate_ai_ideas(st.session_state.search_query)}</div>", unsafe_allow_html=True)
     st.markdown("---")
 
 # AREA STALKER
@@ -407,17 +453,12 @@ if results:
             
         with c_insight2:
             st.markdown(f"""<div class="insight-title" style="margin-bottom:10px;">📈 Google Trends: Rising Keywords (YouTube)</div>""", unsafe_allow_html=True)
-            
-            # --- LOGIKA FALLBACK BARU ---
             if st.session_state.rising_trends is None:
-                # Jika diblokir, buat link langsung ke Google Trends
-                encoded_query = urllib.parse.quote(query)
+                encoded_query = urllib.parse.quote(st.session_state.search_query)
                 geo_code = COUNTRY_CODES[country_name] if COUNTRY_CODES[country_name] else ''
                 trends_url = f"https://trends.google.com/trends/explore?date=now%207-d&gprop=youtube&q={encoded_query}&geo={geo_code}"
-                
                 st.warning("⚠️ Server Streamlit sedang dibatasi oleh sistem Google Trends.")
                 st.link_button("📊 Cek Manual Langsung di Google Trends", trends_url, use_container_width=True)
-            
             elif not st.session_state.rising_trends:
                 st.info("ℹ️ Tidak ada lonjakan tren signifikan untuk kata kunci ini dalam 7 hari terakhir.")
             else:
