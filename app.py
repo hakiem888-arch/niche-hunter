@@ -13,7 +13,7 @@ from pytrends.request import TrendReq
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V7.3 (Fixed)", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Pro Niche Finder V7.4 (Stable)", layout="wide", page_icon="🚀")
 
 # --- API KEY SETUP ---
 try:
@@ -335,6 +335,9 @@ with st.sidebar:
                         st.rerun()
             st.markdown("<div style='margin-bottom:15px;'></div>", unsafe_allow_html=True)
 
+        # Update variable agar bisa dipakai secara global
+        st.session_state.search_query = query_input
+
         country_name = st.selectbox("🌍 Lokasi Negara", list(COUNTRY_CODES.keys()), index=1)
         c1, c2 = st.columns(2)
         with c1: dur = st.selectbox("Durasi", ["Semua", "Short (<4m)", "Medium (4-20m)", "Long (>20m)"])
@@ -359,29 +362,28 @@ with st.sidebar:
             st.session_state.stalk_channel = None
             st.rerun()
 
-st.title(f"🕵️ Niche Hunter V7.3 (Fixed)")
+st.title(f"🕵️ Niche Hunter V7.4 (Stable)")
 
 if 'results' not in st.session_state: st.session_state.results = []
 if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = None
 if 'best_time' not in st.session_state: st.session_state.best_time = None
 if 'rising_trends' not in st.session_state: st.session_state.rising_trends = None
 
-# LOGIC SEARCH & TRENDS (FIXED: Menggunakan query_input)
-if mode == "🔍 Pencarian Kata Kunci" and 'btn_cari' in locals() and btn_cari and query_input:
+# LOGIC SEARCH & TRENDS (FIXED MENGGUNAKAN SESSION STATE)
+if mode == "🔍 Pencarian Kata Kunci" and 'btn_cari' in locals() and btn_cari and st.session_state.search_query:
     st.session_state.stalk_channel = None 
-    st.session_state.search_query = query_input 
     dur_map = {'Short (<4m)': 'short', 'Medium (4-20m)': 'medium', 'Long (>20m)': 'long'}.get(dur, 'any')
     
-    with st.spinner(f"Mencari data video untuk '{query_input}'..."):
+    with st.spinner(f"Mencari data video untuk '{st.session_state.search_query}'..."):
         st.session_state.results = search_youtube(
-            query=query_input, region_code=COUNTRY_CODES[country_name], duration=dur_map,
+            query=st.session_state.search_query, region_code=COUNTRY_CODES[country_name], duration=dur_map,
             category_id=CATEGORIES[cat_name], published_after=get_published_after_rfc3339(TIME_FILTERS[time_label]),
             license_type=LICENSE_OPTIONS[lic_label], sort_order=SORT_OPTIONS[sort_label], max_results=max_res
         )
         st.session_state.best_time = estimate_best_time(st.session_state.results)
         
     with st.spinner("Menganalisis Google Trends..."):
-        st.session_state.rising_trends = get_rising_trends(query_input, COUNTRY_CODES[country_name])
+        st.session_state.rising_trends = get_rising_trends(st.session_state.search_query, COUNTRY_CODES[country_name])
 
 # LOGIC TRENDING
 if mode == "🔥 Trending (Viral)" and 'btn_trending' in locals() and btn_trending:
@@ -394,13 +396,13 @@ if mode == "🔥 Trending (Viral)" and 'btn_trending' in locals() and btn_trendi
         st.session_state.rising_trends = None
 
 # --- BLOK UI AI GENERATOR ---
-if mode == "🔍 Pencarian Kata Kunci" and query_input:
+if mode == "🔍 Pencarian Kata Kunci" and st.session_state.search_query:
     st.markdown("---")
     with st.expander("✨🤖 AI Daily Ideas: Generate Ide Konten Fresh!", expanded=False):
-        st.markdown(f"Minta AI memikirkan ide video *out-of-the-box* berdasarkan kata kunci: **{query_input}**")
+        st.markdown(f"Minta AI memikirkan ide video *out-of-the-box* berdasarkan kata kunci: **{st.session_state.search_query}**")
         if st.button("💡 Generate 5 Ide Viral", type="primary"):
             with st.spinner("AI sedang memutar otak menganalisis algoritma..."):
-                st.markdown(f"<div class='ai-box'>{generate_ai_ideas(query_input)}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='ai-box'>{generate_ai_ideas(st.session_state.search_query)}</div>", unsafe_allow_html=True)
     st.markdown("---")
 
 # AREA STALKER
@@ -443,8 +445,13 @@ if results:
             
         with c_insight2:
             st.markdown(f"""<div class="insight-title" style="margin-bottom:10px;">📈 Google Trends: Rising Keywords (YouTube)</div>""", unsafe_allow_html=True)
-            if st.session_state.rising_trends is None:
-                encoded_query = urllib.parse.quote(query_input)
+            
+            # CEGAH ERROR JIKA BERADA DI MODE TRENDING
+            if mode == "🔥 Trending (Viral)":
+                st.info("ℹ️ Fitur Google Trends hanya aktif pada Mode Pencarian Kata Kunci.")
+            elif st.session_state.rising_trends is None:
+                # URL Encoder sekarang mengambil data dengan aman dari session_state
+                encoded_query = urllib.parse.quote(st.session_state.search_query)
                 geo_code = COUNTRY_CODES[country_name] if COUNTRY_CODES[country_name] else ''
                 trends_url = f"https://trends.google.com/trends/explore?date=now%207-d&gprop=youtube&q={encoded_query}&geo={geo_code}"
                 st.warning("⚠️ Server Streamlit sedang dibatasi oleh sistem Google Trends.")
