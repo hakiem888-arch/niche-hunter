@@ -13,7 +13,7 @@ from pytrends.request import TrendReq
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V9.0 (Agency Suite)", layout="wide", page_icon="🏢")
+st.set_page_config(page_title="Pro Niche Finder V9.1 (Nav Fix)", layout="wide", page_icon="🏢")
 
 # --- API KEY SETUP ---
 try:
@@ -89,7 +89,6 @@ st.markdown("""
 # 4. FUNGSI LOGIKA (BACKEND)
 # ==========================================
 
-# --- FUNGSI BARU: PENCARIAN CHANNEL ---
 def search_youtube_channels(query, max_results=5):
     try:
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
@@ -109,8 +108,7 @@ def search_youtube_channels(query, max_results=5):
                 'videos': format_number(int(item['statistics'].get('videoCount', 0)))
             })
         return channels
-    except Exception as e:
-        return []
+    except: return []
 
 def get_youtube_suggestions(query):
     if not query or len(query) < 2: return []
@@ -271,7 +269,7 @@ def analyze_channel_deep(channel_id):
             'favorite_upload_hour': best_hour_str,
             'top_seo_tags': top_tags
         }
-    except Exception as e: return None
+    except: return None
 
 def process_video_response(items, youtube, region_code):
     channel_ids = list(set([item['snippet']['channelId'] for item in items]))
@@ -311,8 +309,7 @@ def process_video_response(items, youtube, region_code):
                 'is_gem': (views/subs if subs > 0 else 0) > 1.5, 'tags': tags, 'seo_score': seo_score, 'seo_checks': seo_checks,
                 'link': f"https://youtu.be/{video_id}"
             })
-        except Exception as e:
-            continue 
+        except: continue 
     return results
 
 def search_youtube(query, region_code='ID', duration='any', category_id=None, published_after=None, license_type=None, sort_order='relevance', max_results=12):
@@ -349,13 +346,17 @@ def get_trending_videos(region_code='ID', category_id=None, max_results=12):
         if category_id: params['videoCategoryId'] = category_id
         response = youtube.videos().list(**params).execute()
         return process_video_response(response.get('items', []), youtube, region_code)
-    except Exception as e: return []
+    except: return []
+
+# --- CALLBACK UNTUK PINDAH MENU AMAN ---
+def goto_analyzer(channel_id):
+    st.session_state.stalk_channel = channel_id
+    st.session_state.app_mode = "🕵️ Analisis Channel"
 
 # ==========================================
 # 5. UI FRONTEND & STATE MANAGEMENT
 # ==========================================
 
-# State Global
 if 'app_mode' not in st.session_state: st.session_state.app_mode = "🔍 Pencarian Video"
 if 'search_query' not in st.session_state: st.session_state.search_query = ""
 if 'suggestions' not in st.session_state: st.session_state.suggestions = []
@@ -368,14 +369,11 @@ if 'channel_search_results' not in st.session_state: st.session_state.channel_se
 with st.sidebar:
     st.title("🎛️ Menu Navigasi")
     
-    # 3 MENU UTAMA
     mode = st.radio("Pilih Mode:", ["🔍 Pencarian Video", "🔥 Trending (Viral)", "🕵️ Analisis Channel"], key="app_mode")
     st.markdown("---")
     
-    # --- SIDEBAR: MODE PENCARIAN VIDEO ---
     if mode == "🔍 Pencarian Video":
         st.header("⚙️ Filter Pencarian")
-        
         col_input, col_btn = st.columns([4, 1])
         with col_input:
             query_input = st.text_input("Kata Kunci Video", value=st.session_state.search_query, placeholder="Misal: ASMR Rain", key="q_input")
@@ -400,7 +398,6 @@ with st.sidebar:
             st.markdown("<div style='margin-bottom:15px;'></div>", unsafe_allow_html=True)
 
         st.session_state.search_query = query_input
-
         country_name = st.selectbox("🌍 Lokasi Negara", list(COUNTRY_CODES.keys()), index=1)
         c1, c2 = st.columns(2)
         with c1: dur = st.selectbox("Durasi", ["Semua", "Short (<4m)", "Medium (4-20m)", "Long (>20m)"])
@@ -409,10 +406,8 @@ with st.sidebar:
         lic_label = st.selectbox("Lisensi", list(LICENSE_OPTIONS.keys()))
         sort_label = st.selectbox("Urutkan Berdasarkan", list(SORT_OPTIONS.keys()), index=0)
         max_res = st.slider("Jumlah Video Ditampilkan", min_value=5, max_value=50, value=12, step=1)
-        
         btn_cari = st.button("🚀 Cari Video", type="primary", use_container_width=True)
     
-    # --- SIDEBAR: MODE TRENDING ---
     elif mode == "🔥 Trending (Viral)":
         st.header("⚙️ Filter Trending")
         country_name = st.selectbox("🌍 Negara Trending", list(COUNTRY_CODES.keys()), index=1)
@@ -420,34 +415,27 @@ with st.sidebar:
         max_res = st.slider("Jumlah Video Ditampilkan", min_value=5, max_value=50, value=12, step=1)
         btn_trending = st.button("🔥 Lihat Trending", type="primary", use_container_width=True)
 
-    # --- SIDEBAR: MODE ANALISIS CHANNEL ---
     elif mode == "🕵️ Analisis Channel":
         st.header("⚙️ Pencarian Channel")
         channel_query = st.text_input("Nama Channel", placeholder="Misal: MrBeast")
         btn_cari_channel = st.button("🔍 Cari Channel", type="primary", use_container_width=True)
-        
         if st.session_state.stalk_channel:
             st.markdown("---")
-            if st.button("❌ Tutup / Cari Channel Lain", use_container_width=True):
+            if st.button("❌ Tutup Analisis", use_container_width=True):
                 st.session_state.stalk_channel = None
                 st.session_state.channel_search_results = []
                 st.rerun()
 
 # ==========================================
-# 6. LOGIKA HALAMAN UTAMA (BERDASARKAN MODE)
+# 6. LOGIKA HALAMAN UTAMA
 # ==========================================
 
-# ------------------------------------------
-# HALAMAN 1 & 2: PENCARIAN VIDEO & TRENDING
-# ------------------------------------------
 if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
     st.title(f"🚀 Niche Hunter: {mode.replace('🔍 ', '').replace('🔥 ', '')}")
 
-    # LOGIC: SEARCH VIDEO
     if mode == "🔍 Pencarian Video" and 'btn_cari' in locals() and btn_cari and st.session_state.search_query:
         st.session_state.stalk_channel = None 
         dur_map = {'Short (<4m)': 'short', 'Medium (4-20m)': 'medium', 'Long (>20m)': 'long'}.get(dur, 'any')
-        
         with st.spinner(f"Mencari data video untuk '{st.session_state.search_query}'..."):
             st.session_state.results = search_youtube(
                 query=st.session_state.search_query, region_code=COUNTRY_CODES[country_name], duration=dur_map,
@@ -455,11 +443,9 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                 license_type=LICENSE_OPTIONS[lic_label], sort_order=SORT_OPTIONS[sort_label], max_results=max_res
             )
             st.session_state.best_time = estimate_best_time(st.session_state.results)
-            
         with st.spinner("Menganalisis Google Trends..."):
             st.session_state.rising_trends = get_rising_trends(st.session_state.search_query, COUNTRY_CODES[country_name])
 
-    # LOGIC: TRENDING VIDEO
     if mode == "🔥 Trending (Viral)" and 'btn_trending' in locals() and btn_trending:
         st.session_state.stalk_channel = None
         with st.spinner(f"Mengambil {max_res} data Trending..."):
@@ -469,7 +455,6 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
             st.session_state.best_time = estimate_best_time(st.session_state.results)
             st.session_state.rising_trends = None
 
-    # UI: AI IDEAS (Khusus Pencarian Video)
     if mode == "🔍 Pencarian Video" and st.session_state.search_query:
         st.markdown("---")
         with st.expander("✨🤖 AI Daily Ideas: Generate Ide Konten Fresh!", expanded=False):
@@ -479,7 +464,6 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                     st.markdown(f"<div class='ai-box'>{generate_ai_ideas(st.session_state.search_query)}</div>", unsafe_allow_html=True)
         st.markdown("---")
 
-    # UI: HASIL PENCARIAN VIDEO
     results = st.session_state.results
     if results:
         with st.expander("📊 Dasbor Analitik Pasar & SEO (vidIQ Style)", expanded=True):
@@ -492,7 +476,6 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
 <h3 style="margin-top:10px; color:var(--text-color);">{st.session_state.best_time}</h3>
 </div>
 """, unsafe_allow_html=True)
-                
             with c_insight2:
                 st.markdown(f"""<div class="insight-title" style="margin-bottom:10px;">📈 Google Trends: Rising Keywords (YouTube)</div>""", unsafe_allow_html=True)
                 if mode == "🔥 Trending (Viral)":
@@ -508,7 +491,6 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                 else:
                     trends_html = "".join([f"<span class='seo-chip'>{t['query']}<span class='seo-count'>+{t['value']}%</span></span>" for t in st.session_state.rising_trends])
                     st.markdown(trends_html, unsafe_allow_html=True)
-                    
             st.markdown("---")
             df = pd.DataFrame(results)
             c_chart, c_seo = st.columns([2, 1])
@@ -529,7 +511,6 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
             with cols[i % 3]:
                 border_color = "2px solid #0ea5e9" if vid['is_gem'] else "1px solid rgba(128,128,128,0.2)"
                 trending_badge = f"<span class='rank-badge'>🔥 Trending #{vid['rank']}</span><br>" if mode == "🔥 Trending (Viral)" else ""
-
                 with st.container(border=True):
                     st.markdown(f"""
 <div style="border: {border_color}; border-radius:8px; padding:5px; margin-bottom:10px;">
@@ -541,11 +522,8 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
 <div class="vph-badge">🔥 {vid['vph_fmt']} VPH</div></div>
 """, unsafe_allow_html=True)
                     
-                    # LOGIC: TOMBOL REDIRECT KE MENU ANALISIS CHANNEL
-                    if st.button("🕵️ Bedah Channel", key=f"stalk_{vid['id']}", use_container_width=True):
-                        st.session_state.stalk_channel = vid['channel_id']
-                        st.session_state.app_mode = "🕵️ Analisis Channel" # Otomatis pindah menu
-                        st.rerun()
+                    # CALLBACK BUTTON DIGUNAKAN DI SINI
+                    st.button("🕵️ Bedah Channel", key=f"stalk_{vid['id']}", on_click=goto_analyzer, args=(vid['channel_id'],), use_container_width=True)
 
                     with st.expander("🤖 Ringkasan & SEO Checklist"):
                         st.caption("🎯 **vidIQ SEO Checklist:**")
@@ -560,19 +538,14 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                             try: st.download_button("⬇️ Thumb", requests.get(vid['thumbnail']).content, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
                             except: pass
 
-# ------------------------------------------
-# HALAMAN 3: ANALISIS CHANNEL (MENU BARU)
-# ------------------------------------------
 elif mode == "🕵️ Analisis Channel":
     st.title("🕵️ Dasbor Intelijen Channel")
     
-    # LOGIC 1: Jika user melakukan pencarian channel manual dari Sidebar
     if 'btn_cari_channel' in locals() and btn_cari_channel and channel_query:
-        st.session_state.stalk_channel = None # Reset dulu
+        st.session_state.stalk_channel = None
         with st.spinner(f"Mencari channel dengan nama '{channel_query}'..."):
             st.session_state.channel_search_results = search_youtube_channels(channel_query)
             
-    # UI 1: Tampilkan hasil pencarian manual (Grid List Channel)
     if not st.session_state.stalk_channel and st.session_state.channel_search_results:
         st.write("### Pilihan Channel:")
         ch_cols = st.columns(min(len(st.session_state.channel_search_results), 5))
@@ -586,7 +559,6 @@ elif mode == "🕵️ Analisis Channel":
                         st.session_state.stalk_channel = ch['id']
                         st.rerun()
                         
-    # LOGIC 2 & UI 2: Tampilkan Data Analisis Mendalam (Jika Channel sudah terpilih)
     if st.session_state.stalk_channel:
         with st.spinner("Menggali strategi rahasia channel ini..."):
             ch_data = analyze_channel_deep(st.session_state.stalk_channel)
