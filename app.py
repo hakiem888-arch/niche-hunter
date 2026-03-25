@@ -591,7 +591,7 @@ elif mode == "🕵️ Analisis Channel":
 <div style="display:flex; align-items:center; gap:25px; margin-bottom:25px;">
 <img src="{ch_data['thumb']}" style="border-radius:50%; width:100px; border:4px solid #f43f5e;">
 <div>
-<h1 style="margin:0; color:#f43f5e;">{ch_data['title']}</h1>
+<h1 style="margin:0; color:#f43f5e; display:flex; align-items:center; gap:10px;">{ch_data['title']} <a href="https://youtube.com/channel/{st.session_state.stalk_channel}" target="_blank" title="Klik Kanan -> Copy Link" style="text-decoration:none; font-size:26px; color:var(--text-color); opacity:0.4;">🔗</a></h1>
 <p style="margin:0; opacity:0.8; font-size:18px;">{ch_data['custom_url']} • <b>{ch_data['subs']}</b> Subscribers • <b>{ch_data['video_count']}</b> Videos</p>
 </div>
 </div>
