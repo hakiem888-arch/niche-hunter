@@ -666,7 +666,7 @@ elif mode == "⚖️ Bandingkan Channel":
 <div style="display:flex; align-items:center; gap:15px; margin-bottom:15px;">
 <img src="{ch_data['thumb']}" style="border-radius:50%; width:70px; border:3px solid #8b5cf6;">
 <div>
-<h3 style="margin:0; color:#8b5cf6; font-size:18px;">{ch_data['title']}</h3>
+<h3 style="margin:0; color:#8b5cf6; font-size:18px; display:flex; align-items:center; gap:8px;">{ch_data['title']} <a href="https://youtube.com/channel/{ch_id}" target="_blank" title="Klik Kanan -> Copy Link" style="text-decoration:none; font-size:18px; color:var(--text-color); opacity:0.4;">🔗</a></h3>
 <p style="margin:0; opacity:0.8; font-size:12px;"><b>{ch_data['subs']}</b> Subs • <b>{ch_data['video_count']}</b> Vids</p>
 </div>
 </div>
