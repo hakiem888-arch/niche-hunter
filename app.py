@@ -13,7 +13,7 @@ from pytrends.request import TrendReq
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V10.0 (Ultimate Compare)", layout="wide", page_icon="🏢")
+st.set_page_config(page_title="Pro Niche Finder V11.0 (Auto-Compare)", layout="wide", page_icon="🏢")
 
 # --- API KEY SETUP ---
 try:
@@ -94,15 +94,12 @@ def search_youtube_channels(query, max_results=5):
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
         res = youtube.search().list(q=query, type='channel', part='snippet', maxResults=max_results).execute()
         ch_ids = [item['snippet']['channelId'] for item in res.get('items', [])]
-        
         if not ch_ids: return []
-        
         stats_res = youtube.channels().list(id=','.join(ch_ids), part='snippet,statistics').execute()
         channels = []
         for item in stats_res.get('items', []):
             channels.append({
-                'id': item['id'],
-                'title': item['snippet']['title'],
+                'id': item['id'], 'title': item['snippet']['title'],
                 'thumb': item['snippet']['thumbnails'].get('medium', item['snippet']['thumbnails'].get('default', {}))['url'],
                 'subs': format_number(int(item['statistics'].get('subscriberCount', 0))),
                 'videos': format_number(int(item['statistics'].get('videoCount', 0)))
@@ -348,9 +345,21 @@ def get_trending_videos(region_code='ID', category_id=None, max_results=12):
         return process_video_response(response.get('items', []), youtube, region_code)
     except Exception as e: return []
 
+# --- CALLBACK FUNCTIONS ---
 def goto_analyzer(channel_id):
     st.session_state.stalk_channel = channel_id
     st.session_state.app_mode = "🕵️ Analisis Channel"
+
+def add_to_compare_and_go(channel_id):
+    if channel_id not in st.session_state.compare_list:
+        if len(st.session_state.compare_list) >= 4:
+            st.session_state.compare_list.pop(0) # Buang yang paling lama jika lebih dari 4
+        st.session_state.compare_list.append(channel_id)
+    st.session_state.app_mode = "⚖️ Bandingkan Channel"
+
+def remove_from_compare(channel_id):
+    if channel_id in st.session_state.compare_list:
+        st.session_state.compare_list.remove(channel_id)
 
 # ==========================================
 # 5. UI FRONTEND & STATE MANAGEMENT
@@ -364,12 +373,11 @@ if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = Non
 if 'best_time' not in st.session_state: st.session_state.best_time = None
 if 'rising_trends' not in st.session_state: st.session_state.rising_trends = None
 if 'channel_search_results' not in st.session_state: st.session_state.channel_search_results = []
-if 'compare_results' not in st.session_state: st.session_state.compare_results = []
+if 'compare_list' not in st.session_state: st.session_state.compare_list = [] # List ID Channel untuk dicompare
 
 with st.sidebar:
     st.title("🎛️ Menu Navigasi")
     
-    # 4 MENU UTAMA SEKARANG
     mode = st.radio("Pilih Mode:", ["🔍 Pencarian Video", "🔥 Trending (Viral)", "🕵️ Analisis Channel", "⚖️ Bandingkan Channel"], key="app_mode")
     st.markdown("---")
     
@@ -428,9 +436,11 @@ with st.sidebar:
                 st.rerun()
                 
     elif mode == "⚖️ Bandingkan Channel":
-        st.header("⚙️ Head-to-Head")
-        compare_input = st.text_input("Masukkan nama channel (Pisahkan dengan koma):", placeholder="Misal: ASMR Bakery, Nona Vlogs")
-        btn_compare = st.button("⚖️ Bandingkan Sekarang", type="primary", use_container_width=True)
+        st.header("⚙️ Status Komparasi")
+        st.info(f"Terdapat **{len(st.session_state.compare_list)}/4** channel dalam daftar perbandingan saat ini.")
+        if st.button("🗑️ Bersihkan Daftar", use_container_width=True):
+            st.session_state.compare_list = []
+            st.rerun()
 
 # ==========================================
 # 6. LOGIKA HALAMAN UTAMA
@@ -529,7 +539,12 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
 <div class="vph-badge">🔥 {vid['vph_fmt']} VPH</div></div>
 """, unsafe_allow_html=True)
                     
-                    st.button("🕵️ Bedah Channel", key=f"stalk_{vid['id']}", on_click=goto_analyzer, args=(vid['channel_id'],), use_container_width=True)
+                    # --- DUA TOMBOL BARU BERDAMPINGAN ---
+                    c_btn1, c_btn2 = st.columns(2)
+                    with c_btn1:
+                        st.button("🕵️ Bedah", key=f"stalk_{vid['id']}", on_click=goto_analyzer, args=(vid['channel_id'],), use_container_width=True)
+                    with c_btn2:
+                        st.button("⚖️ +Banding", key=f"comp_{vid['id']}", on_click=add_to_compare_and_go, args=(vid['channel_id'],), use_container_width=True)
 
                     with st.expander("🤖 Ringkasan & SEO Checklist"):
                         st.caption("🎯 **vidIQ SEO Checklist:**")
@@ -544,7 +559,7 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                             try: st.download_button("⬇️ Thumb", requests.get(vid['thumbnail']).content, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
                             except: pass
 
-# --- MODE ANALISIS CHANNEL ---
+# --- MODE ANALISIS CHANNEL (SATUAN) ---
 elif mode == "🕵️ Analisis Channel":
     st.title("🕵️ Dasbor Intelijen Channel")
     
@@ -580,7 +595,7 @@ elif mode == "🕵️ Analisis Channel":
 <p style="margin:0; opacity:0.8; font-size:18px;">{ch_data['custom_url']} • <b>{ch_data['subs']}</b> Subscribers • <b>{ch_data['video_count']}</b> Videos</p>
 </div>
 </div>
-<div style="display:flex; gap:15px; margin-bottom:30px;">
+<div style="display:flex; flex-wrap: wrap; gap:15px; margin-bottom:30px;">
 <div style="flex:1; background:rgba(128,128,128,0.1); padding:20px; border-radius:10px; text-align:center;">
 <div style="font-size:28px; font-weight:bold; color:#4ade80;">{ch_data['avg_recent_views']}</div>
 <div style="font-size:14px; opacity:0.7;">Rata-rata Views (15 Video Terakhir)</div>
@@ -599,17 +614,13 @@ elif mode == "🕵️ Analisis Channel":
 """, unsafe_allow_html=True)
             
             if ch_data['top_seo_tags']:
-                tags_html = "".join([f"<span class='seo-chip' style='border-color:#f43f5e; font-size:14px; padding:8px 15px;'>{t[0]}<span class='seo-count' style='background:rgba(244,63,94,0.2); color:#f43f5e;'>{t[1]}x dipakai</span></span>" for t in ch_data['top_seo_tags']])
+                tags_html = "".join([f"<span class='seo-chip' style='border-color:#f43f5e; font-size:14px; padding:8px 15px;'>{t[0]}<span class='seo-count' style='background:rgba(244,63,94,0.2); color:#f43f5e;'>{t[1]}x</span></span>" for t in ch_data['top_seo_tags']])
                 st.markdown(tags_html, unsafe_allow_html=True)
                 
-                # --- FITUR BARU: COPY TAGS MUDAH ---
                 tags_list = [t[0] for t in ch_data['top_seo_tags']]
-                tags_string = ", ".join(tags_list)
                 st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
                 st.caption("📋 **Copy Semua Tag untuk Videomu:**")
-                st.code(tags_string, language="text")
-                # ------------------------------------
-                
+                st.code(", ".join(tags_list), language="text")
             else:
                 st.info("Channel ini sangat natural/pelit tag. Mereka jarang menggunakan SEO Tags pada video terbarunya.")
                 
@@ -633,46 +644,61 @@ elif mode == "🕵️ Analisis Channel":
     elif not st.session_state.channel_search_results:
         st.info("👈 Silakan gunakan menu **Pencarian Channel** di sidebar kiri untuk mencari nama YouTuber yang ingin dianalisis, atau gunakan tombol **'Bedah Channel'** saat sedang meriset video.")
 
-# --- MODE BARU: BANDINGKAN CHANNEL ---
+# --- MODE BARU: BANDINGKAN CHANNEL (AUTO-CLONE UI) ---
 elif mode == "⚖️ Bandingkan Channel":
     st.title("⚖️ Perbandingan Channel (Head-to-Head)")
     st.write("Analisis kekuatan kompetitor secara berdampingan untuk melihat siapa yang lebih unggul dalam SEO dan performa.")
     
-    if 'btn_compare' in locals() and btn_compare and compare_input:
-        channel_names = [name.strip() for name in compare_input.split(",") if name.strip()]
-        
-        if len(channel_names) < 2:
-            st.warning("⚠️ Masukkan minimal 2 nama channel yang dipisahkan dengan koma.")
-        else:
-            with st.spinner("Mengumpulkan data intelijen dari YouTube..."):
-                st.session_state.compare_results = []
-                for name in channel_names[:4]: # Batasi maksimal 4 channel agar tidak berat
-                    ch_search = search_youtube_channels(name, max_results=1)
-                    if ch_search:
-                        ch_deep = analyze_channel_deep(ch_search[0]['id'])
-                        if ch_deep:
-                            st.session_state.compare_results.append(ch_deep)
+    if not st.session_state.compare_list:
+        st.info("💡 **Daftar perbandingan masih kosong.** Silakan kembali ke menu 'Pencarian Video' dan klik tombol **'⚖️ +Banding'** pada channel yang ingin kamu pelajari.")
+    else:
+        with st.spinner("Menarik data intelijen dari YouTube..."):
+            # Membuat grid kolom sesuai jumlah channel yang dibandingkan
+            cols = st.columns(len(st.session_state.compare_list))
+            
+            for idx, ch_id in enumerate(st.session_state.compare_list):
+                with cols[idx]:
+                    ch_data = analyze_channel_deep(ch_id)
+                    if ch_data:
+                        # KLONING UI STALKER UNTUK MODE COMPARE (DENGAN TEMA UNGU)
+                        st.markdown(f"""
+<div class="stalker-box" style="border: 2px solid #8b5cf6; box-shadow: 0 0 15px rgba(139, 92, 246, 0.2); padding: 15px;">
+<div style="display:flex; align-items:center; gap:15px; margin-bottom:15px;">
+<img src="{ch_data['thumb']}" style="border-radius:50%; width:70px; border:3px solid #8b5cf6;">
+<div>
+<h3 style="margin:0; color:#8b5cf6; font-size:18px;">{ch_data['title']}</h3>
+<p style="margin:0; opacity:0.8; font-size:12px;"><b>{ch_data['subs']}</b> Subs • <b>{ch_data['video_count']}</b> Vids</p>
+</div>
+</div>
+<div style="display:flex; flex-direction: column; gap:10px; margin-bottom:20px;">
+<div style="background:rgba(128,128,128,0.1); padding:10px; border-radius:8px; text-align:center;">
+<div style="font-size:20px; font-weight:bold; color:#4ade80;">{ch_data['avg_recent_views']}</div>
+<div style="font-size:11px; opacity:0.7;">Rata-rata Views</div>
+</div>
+<div style="background:rgba(128,128,128,0.1); padding:10px; border-radius:8px; text-align:center;">
+<div style="font-size:20px; font-weight:bold; color:#facc15;">{ch_data['total_views']}</div>
+<div style="font-size:11px; opacity:0.7;">Total Views</div>
+</div>
+<div style="background:rgba(139, 92, 246, 0.1); padding:10px; border-radius:8px; text-align:center; border: 1px solid rgba(139,92,246,0.3);">
+<div style="font-size:20px; font-weight:bold; color:#8b5cf6;">⏰ {ch_data['favorite_upload_hour']}</div>
+<div style="font-size:11px; opacity:0.9; color:#8b5cf6;">Jam Upload Favorit</div>
+</div>
+</div>
+<div style="margin-bottom: 15px;">
+<div class="stalker-highlight" style="font-size:14px; color:#8b5cf6;">🎯 Top SEO Tags:</div>
+""", unsafe_allow_html=True)
+                        
+                        if ch_data['top_seo_tags']:
+                            tags_html = "".join([f"<span class='seo-chip' style='border-color:#8b5cf6; font-size:11px; padding:4px 8px; margin:2px;'>{t[0]}<span class='seo-count' style='background:rgba(139,92,246,0.2); color:#8b5cf6;'>{t[1]}x</span></span>" for t in ch_data['top_seo_tags']])
+                            st.markdown(tags_html, unsafe_allow_html=True)
                             
-    if st.session_state.compare_results:
-        cols = st.columns(len(st.session_state.compare_results))
-        for idx, ch in enumerate(st.session_state.compare_results):
-            with cols[idx]:
-                with st.container(border=True):
-                    st.image(ch['thumb'], width=80)
-                    st.markdown(f"<h3 style='color:#0ea5e9; margin-bottom:0;'>{ch['title']}</h3>", unsafe_allow_html=True)
-                    st.caption(f"{ch['custom_url']}")
-                    st.markdown("---")
-                    
-                    st.metric("👥 Subscribers", ch['subs'])
-                    st.metric("📈 Total Views", ch['total_views'])
-                    st.metric("🔥 Rata-rata Views (Terbaru)", ch['avg_recent_views'])
-                    st.metric("🎥 Total Video", ch['video_count'])
-                    st.metric("⏰ Jam Upload Favorit", ch['favorite_upload_hour'].replace("Pukul ", ""))
-                    
-                    st.markdown("---")
-                    st.markdown("**🏷️ Top 5 Strategi Tag:**")
-                    if ch['top_seo_tags']:
-                        tags_str = ", ".join([t[0] for t in ch['top_seo_tags'][:5]])
-                        st.info(tags_str)
-                    else:
-                        st.warning("Tidak menggunakan Tag SEO.")
+                            tags_list = [t[0] for t in ch_data['top_seo_tags']]
+                            st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+                            st.code(", ".join(tags_list), language="text")
+                        else:
+                            st.info("Tidak menggunakan Tag.")
+                            
+                        st.markdown("</div></div>", unsafe_allow_html=True)
+                        
+                        # TOMBOL UNTUK MENGHAPUS CHANNEL DARI DAFTAR COMPARE
+                        st.button("❌ Hapus dari Daftar", key=f"del_comp_{ch_id}", on_click=remove_from_compare, args=(ch_id,), use_container_width=True)
