@@ -13,7 +13,7 @@ from pytrends.request import TrendReq
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V8.1 (UI Fixed)", layout="wide", page_icon="🕵️‍♂️")
+st.set_page_config(page_title="Pro Niche Finder V9.0 (Agency Suite)", layout="wide", page_icon="🏢")
 
 # --- API KEY SETUP ---
 try:
@@ -88,6 +88,29 @@ st.markdown("""
 # ==========================================
 # 4. FUNGSI LOGIKA (BACKEND)
 # ==========================================
+
+# --- FUNGSI BARU: PENCARIAN CHANNEL ---
+def search_youtube_channels(query, max_results=5):
+    try:
+        youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
+        res = youtube.search().list(q=query, type='channel', part='snippet', maxResults=max_results).execute()
+        ch_ids = [item['snippet']['channelId'] for item in res.get('items', [])]
+        
+        if not ch_ids: return []
+        
+        stats_res = youtube.channels().list(id=','.join(ch_ids), part='snippet,statistics').execute()
+        channels = []
+        for item in stats_res.get('items', []):
+            channels.append({
+                'id': item['id'],
+                'title': item['snippet']['title'],
+                'thumb': item['snippet']['thumbnails'].get('medium', item['snippet']['thumbnails'].get('default', {}))['url'],
+                'subs': format_number(int(item['statistics'].get('subscriberCount', 0))),
+                'videos': format_number(int(item['statistics'].get('videoCount', 0)))
+            })
+        return channels
+    except Exception as e:
+        return []
 
 def get_youtube_suggestions(query):
     if not query or len(query) < 2: return []
@@ -329,23 +352,33 @@ def get_trending_videos(region_code='ID', category_id=None, max_results=12):
     except Exception as e: return []
 
 # ==========================================
-# 5. UI FRONTEND
+# 5. UI FRONTEND & STATE MANAGEMENT
 # ==========================================
 
+# State Global
+if 'app_mode' not in st.session_state: st.session_state.app_mode = "🔍 Pencarian Video"
 if 'search_query' not in st.session_state: st.session_state.search_query = ""
 if 'suggestions' not in st.session_state: st.session_state.suggestions = []
+if 'results' not in st.session_state: st.session_state.results = []
+if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = None
+if 'best_time' not in st.session_state: st.session_state.best_time = None
+if 'rising_trends' not in st.session_state: st.session_state.rising_trends = None
+if 'channel_search_results' not in st.session_state: st.session_state.channel_search_results = []
 
 with st.sidebar:
     st.title("🎛️ Menu Navigasi")
-    mode = st.radio("Pilih Mode:", ["🔍 Pencarian Kata Kunci", "🔥 Trending (Viral)"])
+    
+    # 3 MENU UTAMA
+    mode = st.radio("Pilih Mode:", ["🔍 Pencarian Video", "🔥 Trending (Viral)", "🕵️ Analisis Channel"], key="app_mode")
     st.markdown("---")
     
-    if mode == "🔍 Pencarian Kata Kunci":
+    # --- SIDEBAR: MODE PENCARIAN VIDEO ---
+    if mode == "🔍 Pencarian Video":
         st.header("⚙️ Filter Pencarian")
         
         col_input, col_btn = st.columns([4, 1])
         with col_input:
-            query_input = st.text_input("Kata Kunci", value=st.session_state.search_query, placeholder="Misal: ASMR Rain", key="q_input")
+            query_input = st.text_input("Kata Kunci Video", value=st.session_state.search_query, placeholder="Misal: ASMR Rain", key="q_input")
         with col_btn:
             st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
             if st.button("💡", help="Klik untuk memunculkan ide Autocomplete dari YouTube"):
@@ -379,169 +412,126 @@ with st.sidebar:
         
         btn_cari = st.button("🚀 Cari Video", type="primary", use_container_width=True)
     
-    else:
+    # --- SIDEBAR: MODE TRENDING ---
+    elif mode == "🔥 Trending (Viral)":
         st.header("⚙️ Filter Trending")
         country_name = st.selectbox("🌍 Negara Trending", list(COUNTRY_CODES.keys()), index=1)
         cat_name = st.selectbox("Kategori (Opsional)", list(CATEGORIES.keys()))
         max_res = st.slider("Jumlah Video Ditampilkan", min_value=5, max_value=50, value=12, step=1)
         btn_trending = st.button("🔥 Lihat Trending", type="primary", use_container_width=True)
 
-    if st.session_state.get('stalk_channel'):
-        st.markdown("---")
-        if st.button("❌ Tutup Mode Stalker"):
-            st.session_state.stalk_channel = None
-            st.rerun()
-
-st.title(f"🕵️ Niche Hunter V8.1 (UI Fixed)")
-
-if 'results' not in st.session_state: st.session_state.results = []
-if 'stalk_channel' not in st.session_state: st.session_state.stalk_channel = None
-if 'best_time' not in st.session_state: st.session_state.best_time = None
-if 'rising_trends' not in st.session_state: st.session_state.rising_trends = None
-
-# LOGIC SEARCH & TRENDS
-if mode == "🔍 Pencarian Kata Kunci" and 'btn_cari' in locals() and btn_cari and st.session_state.search_query:
-    st.session_state.stalk_channel = None 
-    dur_map = {'Short (<4m)': 'short', 'Medium (4-20m)': 'medium', 'Long (>20m)': 'long'}.get(dur, 'any')
-    
-    with st.spinner(f"Mencari data video untuk '{st.session_state.search_query}'..."):
-        st.session_state.results = search_youtube(
-            query=st.session_state.search_query, region_code=COUNTRY_CODES[country_name], duration=dur_map,
-            category_id=CATEGORIES[cat_name], published_after=get_published_after_rfc3339(TIME_FILTERS[time_label]),
-            license_type=LICENSE_OPTIONS[lic_label], sort_order=SORT_OPTIONS[sort_label], max_results=max_res
-        )
-        st.session_state.best_time = estimate_best_time(st.session_state.results)
+    # --- SIDEBAR: MODE ANALISIS CHANNEL ---
+    elif mode == "🕵️ Analisis Channel":
+        st.header("⚙️ Pencarian Channel")
+        channel_query = st.text_input("Nama Channel", placeholder="Misal: MrBeast")
+        btn_cari_channel = st.button("🔍 Cari Channel", type="primary", use_container_width=True)
         
-    with st.spinner("Menganalisis Google Trends..."):
-        st.session_state.rising_trends = get_rising_trends(st.session_state.search_query, COUNTRY_CODES[country_name])
+        if st.session_state.stalk_channel:
+            st.markdown("---")
+            if st.button("❌ Tutup / Cari Channel Lain", use_container_width=True):
+                st.session_state.stalk_channel = None
+                st.session_state.channel_search_results = []
+                st.rerun()
 
-# LOGIC TRENDING
-if mode == "🔥 Trending (Viral)" and 'btn_trending' in locals() and btn_trending:
-    st.session_state.stalk_channel = None
-    with st.spinner(f"Mengambil {max_res} data Trending..."):
-        st.session_state.results = get_trending_videos(
-            region_code=COUNTRY_CODES[country_name], category_id=CATEGORIES[cat_name], max_results=max_res
-        )
-        st.session_state.best_time = estimate_best_time(st.session_state.results)
-        st.session_state.rising_trends = None
+# ==========================================
+# 6. LOGIKA HALAMAN UTAMA (BERDASARKAN MODE)
+# ==========================================
 
-# --- BLOK UI AI GENERATOR ---
-if mode == "🔍 Pencarian Kata Kunci" and st.session_state.search_query:
-    st.markdown("---")
-    with st.expander("✨🤖 AI Daily Ideas: Generate Ide Konten Fresh!", expanded=False):
-        st.markdown(f"Minta AI memikirkan ide video *out-of-the-box* berdasarkan kata kunci: **{st.session_state.search_query}**")
-        if st.button("💡 Generate 5 Ide Viral", type="primary"):
-            with st.spinner("AI sedang memutar otak menganalisis algoritma..."):
-                st.markdown(f"<div class='ai-box'>{generate_ai_ideas(st.session_state.search_query)}</div>", unsafe_allow_html=True)
-    st.markdown("---")
+# ------------------------------------------
+# HALAMAN 1 & 2: PENCARIAN VIDEO & TRENDING
+# ------------------------------------------
+if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
+    st.title(f"🚀 Niche Hunter: {mode.replace('🔍 ', '').replace('🔥 ', '')}")
 
-# --- AREA STALKER (UI FIXED) ---
-if st.session_state.stalk_channel:
-    with st.spinner("Sedang membedah strategi rahasia channel ini..."):
-        ch_data = analyze_channel_deep(st.session_state.stalk_channel)
-    if ch_data:
-        st.markdown(f"""
-<div class="stalker-box" style="border: 2px solid #f43f5e; box-shadow: 0 0 15px rgba(244, 63, 94, 0.2);">
-<div style="display:flex; align-items:center; gap:20px; margin-bottom:20px;">
-<img src="{ch_data['thumb']}" style="border-radius:50%; width:90px; border:3px solid #f43f5e;">
-<div>
-<h2 style="margin:0; color:#f43f5e;">{ch_data['title']} <span style="font-size:14px; color:var(--text-color); opacity:0.7;">{ch_data['custom_url']}</span></h2>
-<p style="margin:0; opacity:0.8; font-size:16px;"><b>{ch_data['subs']}</b> Subscribers • <b>{ch_data['video_count']}</b> Videos</p>
-</div>
-</div>
-<div style="display:flex; gap:15px; margin-bottom:20px;">
-<div style="flex:1; background:rgba(128,128,128,0.1); padding:15px; border-radius:10px; text-align:center;">
-<div style="font-size:20px; font-weight:bold; color:#4ade80;">{ch_data['avg_recent_views']}</div>
-<div style="font-size:12px; opacity:0.7;">Avg Views (Recent)</div>
-</div>
-<div style="flex:1; background:rgba(128,128,128,0.1); padding:15px; border-radius:10px; text-align:center;">
-<div style="font-size:20px; font-weight:bold; color:#facc15;">{ch_data['total_views']}</div>
-<div style="font-size:12px; opacity:0.7;">Total Views</div>
-</div>
-<div style="flex:1; background:rgba(244, 63, 94, 0.1); padding:15px; border-radius:10px; text-align:center; border: 1px solid rgba(244,63,94,0.3);">
-<div style="font-size:20px; font-weight:bold; color:#f43f5e;">⏰ {ch_data['favorite_upload_hour']}</div>
-<div style="font-size:12px; opacity:0.9; color:#f43f5e;">Jam Upload Terbanyak</div>
-</div>
-</div>
-<div style="margin-bottom: 20px;">
-<div class="stalker-highlight">🎯 Strategi SEO Tersembunyi (Top 15 Tags):</div>
-""", unsafe_allow_html=True)
+    # LOGIC: SEARCH VIDEO
+    if mode == "🔍 Pencarian Video" and 'btn_cari' in locals() and btn_cari and st.session_state.search_query:
+        st.session_state.stalk_channel = None 
+        dur_map = {'Short (<4m)': 'short', 'Medium (4-20m)': 'medium', 'Long (>20m)': 'long'}.get(dur, 'any')
         
-        if ch_data['top_seo_tags']:
-            tags_html = "".join([f"<span class='seo-chip' style='border-color:#f43f5e;'>{t[0]}<span class='seo-count' style='background:rgba(244,63,94,0.2); color:#f43f5e;'>{t[1]}x</span></span>" for t in ch_data['top_seo_tags']])
-            st.markdown(tags_html, unsafe_allow_html=True)
-        else:
-            st.info("Channel ini pelit tag, mereka tidak menggunakan SEO Tags pada video terbarunya.")
+        with st.spinner(f"Mencari data video untuk '{st.session_state.search_query}'..."):
+            st.session_state.results = search_youtube(
+                query=st.session_state.search_query, region_code=COUNTRY_CODES[country_name], duration=dur_map,
+                category_id=CATEGORIES[cat_name], published_after=get_published_after_rfc3339(TIME_FILTERS[time_label]),
+                license_type=LICENSE_OPTIONS[lic_label], sort_order=SORT_OPTIONS[sort_label], max_results=max_res
+            )
+            st.session_state.best_time = estimate_best_time(st.session_state.results)
             
-        st.markdown(f"""
-<hr style="border-color: rgba(128,128,128,0.2);">
-<h4 style="margin-bottom:10px;">🎥 5 Bukti Upload Terakhir:</h4>
-</div>
-""", unsafe_allow_html=True)
+        with st.spinner("Menganalisis Google Trends..."):
+            st.session_state.rising_trends = get_rising_trends(st.session_state.search_query, COUNTRY_CODES[country_name])
 
-        sc1, sc2, sc3, sc4, sc5 = st.columns(5)
-        for i, vid in enumerate(ch_data['recent_videos']):
-            with [sc1, sc2, sc3, sc4, sc5][i]:
-                st.image(vid['thumb'], use_container_width=True)
-                st.caption(f"📅 {vid['date']}")
-                st.markdown(f"**👁️ {vid['views']}**")
-                st.markdown(f"<span style='font-size:11px; opacity:0.8;'>{vid['title'][:40]}..</span>", unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
+    # LOGIC: TRENDING VIDEO
+    if mode == "🔥 Trending (Viral)" and 'btn_trending' in locals() and btn_trending:
+        st.session_state.stalk_channel = None
+        with st.spinner(f"Mengambil {max_res} data Trending..."):
+            st.session_state.results = get_trending_videos(
+                region_code=COUNTRY_CODES[country_name], category_id=CATEGORIES[cat_name], max_results=max_res
+            )
+            st.session_state.best_time = estimate_best_time(st.session_state.results)
+            st.session_state.rising_trends = None
 
-# AREA UTAMA / HASIL PENCARIAN
-results = st.session_state.results
+    # UI: AI IDEAS (Khusus Pencarian Video)
+    if mode == "🔍 Pencarian Video" and st.session_state.search_query:
+        st.markdown("---")
+        with st.expander("✨🤖 AI Daily Ideas: Generate Ide Konten Fresh!", expanded=False):
+            st.markdown(f"Minta AI memikirkan ide video *out-of-the-box* berdasarkan kata kunci: **{st.session_state.search_query}**")
+            if st.button("💡 Generate 5 Ide Viral", type="primary"):
+                with st.spinner("AI sedang memutar otak menganalisis algoritma..."):
+                    st.markdown(f"<div class='ai-box'>{generate_ai_ideas(st.session_state.search_query)}</div>", unsafe_allow_html=True)
+        st.markdown("---")
 
-if results:
-    with st.expander("📊 Dasbor Analitik Pasar & SEO (vidIQ Style)", expanded=True):
-        c_insight1, c_insight2 = st.columns(2)
-        with c_insight1:
-            st.markdown(f"""
+    # UI: HASIL PENCARIAN VIDEO
+    results = st.session_state.results
+    if results:
+        with st.expander("📊 Dasbor Analitik Pasar & SEO (vidIQ Style)", expanded=True):
+            c_insight1, c_insight2 = st.columns(2)
+            with c_insight1:
+                st.markdown(f"""
 <div class="insight-box">
 <div class="insight-title">⏰ Waktu Upload Paling Ideal</div>
 <div>Berdasarkan pola kompetitor teratas yang viral, usahakan melakukan publikasi / live streaming pada hari:</div>
 <h3 style="margin-top:10px; color:var(--text-color);">{st.session_state.best_time}</h3>
 </div>
 """, unsafe_allow_html=True)
-            
-        with c_insight2:
-            st.markdown(f"""<div class="insight-title" style="margin-bottom:10px;">📈 Google Trends: Rising Keywords (YouTube)</div>""", unsafe_allow_html=True)
-            if mode == "🔥 Trending (Viral)":
-                st.info("ℹ️ Fitur Google Trends hanya aktif pada Mode Pencarian Kata Kunci.")
-            elif st.session_state.rising_trends is None:
-                encoded_query = urllib.parse.quote(st.session_state.search_query)
-                geo_code = COUNTRY_CODES[country_name] if COUNTRY_CODES[country_name] else ''
-                trends_url = f"https://trends.google.com/trends/explore?date=now%207-d&gprop=youtube&q={encoded_query}&geo={geo_code}"
-                st.warning("⚠️ Server Streamlit sedang dibatasi oleh sistem Google Trends.")
-                st.link_button("📊 Cek Manual Langsung di Google Trends", trends_url, use_container_width=True)
-            elif not st.session_state.rising_trends:
-                st.info("ℹ️ Tidak ada lonjakan tren signifikan untuk kata kunci ini dalam 7 hari terakhir.")
-            else:
-                trends_html = "".join([f"<span class='seo-chip'>{t['query']}<span class='seo-count'>+{t['value']}%</span></span>" for t in st.session_state.rising_trends])
-                st.markdown(trends_html, unsafe_allow_html=True)
                 
-        st.markdown("---")
-        df = pd.DataFrame(results)
-        c_chart, c_seo = st.columns([2, 1])
-        with c_chart:
-            st.caption("📈 Performa Video Competitor (VPH)")
-            st.bar_chart(df[['title', 'vph']].set_index('title').head(10))
-        with c_seo:
-            st.caption("🏷️ Top Tags Competitor")
-            all_tags = [t for vid in results for t in vid['tags']]
-            if all_tags: st.markdown("".join([f"<span class='seo-chip'>{t[0]}<span class='seo-count'>{t[1]}</span></span>" for t in Counter(all_tags).most_common(15)]), unsafe_allow_html=True)
+            with c_insight2:
+                st.markdown(f"""<div class="insight-title" style="margin-bottom:10px;">📈 Google Trends: Rising Keywords (YouTube)</div>""", unsafe_allow_html=True)
+                if mode == "🔥 Trending (Viral)":
+                    st.info("ℹ️ Fitur Google Trends hanya aktif pada Mode Pencarian Kata Kunci.")
+                elif st.session_state.rising_trends is None:
+                    encoded_query = urllib.parse.quote(st.session_state.search_query)
+                    geo_code = COUNTRY_CODES[country_name] if COUNTRY_CODES[country_name] else ''
+                    trends_url = f"https://trends.google.com/trends/explore?date=now%207-d&gprop=youtube&q={encoded_query}&geo={geo_code}"
+                    st.warning("⚠️ Server Streamlit sedang dibatasi oleh sistem Google Trends.")
+                    st.link_button("📊 Cek Manual Langsung di Google Trends", trends_url, use_container_width=True)
+                elif not st.session_state.rising_trends:
+                    st.info("ℹ️ Tidak ada lonjakan tren signifikan untuk kata kunci ini dalam 7 hari terakhir.")
+                else:
+                    trends_html = "".join([f"<span class='seo-chip'>{t['query']}<span class='seo-count'>+{t['value']}%</span></span>" for t in st.session_state.rising_trends])
+                    st.markdown(trends_html, unsafe_allow_html=True)
+                    
+            st.markdown("---")
+            df = pd.DataFrame(results)
+            c_chart, c_seo = st.columns([2, 1])
+            with c_chart:
+                st.caption("📈 Performa Video Competitor (VPH)")
+                st.bar_chart(df[['title', 'vph']].set_index('title').head(10))
+            with c_seo:
+                st.caption("🏷️ Top Tags Competitor")
+                all_tags = [t for vid in results for t in vid['tags']]
+                if all_tags: st.markdown("".join([f"<span class='seo-chip'>{t[0]}<span class='seo-count'>{t[1]}</span></span>" for t in Counter(all_tags).most_common(15)]), unsafe_allow_html=True)
 
-    c_info, c_dl = st.columns([3, 1])
-    with c_info: st.success(f"Menampilkan {len(results)} Video dari pencarian.")
-    with c_dl: st.download_button("💾 CSV", pd.DataFrame(results).to_csv(index=False), "data_riset.csv", "text/csv", use_container_width=True)
+        c_info, c_dl = st.columns([3, 1])
+        with c_info: st.success(f"Menampilkan {len(results)} Video.")
+        with c_dl: st.download_button("💾 CSV", pd.DataFrame(results).to_csv(index=False), "data_riset.csv", "text/csv", use_container_width=True)
 
-    cols = st.columns(3)
-    for i, vid in enumerate(results):
-        with cols[i % 3]:
-            border_color = "2px solid #0ea5e9" if vid['is_gem'] else "1px solid rgba(128,128,128,0.2)"
-            trending_badge = f"<span class='rank-badge'>🔥 Trending #{vid['rank']}</span><br>" if mode == "🔥 Trending (Viral)" else ""
+        cols = st.columns(3)
+        for i, vid in enumerate(results):
+            with cols[i % 3]:
+                border_color = "2px solid #0ea5e9" if vid['is_gem'] else "1px solid rgba(128,128,128,0.2)"
+                trending_badge = f"<span class='rank-badge'>🔥 Trending #{vid['rank']}</span><br>" if mode == "🔥 Trending (Viral)" else ""
 
-            with st.container(border=True):
-                st.markdown(f"""
+                with st.container(border=True):
+                    st.markdown(f"""
 <div style="border: {border_color}; border-radius:8px; padding:5px; margin-bottom:10px;">
 {trending_badge}<a href="{vid['link']}" target="_blank"><img src="{vid['thumbnail']}" style="width:100%; border-radius:8px; margin-bottom:8px;"></a>
 <div class="video-title">{vid["title"]}</div>
@@ -550,19 +540,107 @@ if results:
 <div class="stats-bar"><span>👁️ {vid['views_fmt']}</span><span>👍 {vid['likes']}</span><span>💬 {vid['comments']}</span></div>
 <div class="vph-badge">🔥 {vid['vph_fmt']} VPH</div></div>
 """, unsafe_allow_html=True)
-                
-                if st.button("🕵️ Bedah Channel", key=f"stalk_{vid['id']}", use_container_width=True):
-                    st.session_state.stalk_channel = vid['channel_id']; st.rerun()
+                    
+                    # LOGIC: TOMBOL REDIRECT KE MENU ANALISIS CHANNEL
+                    if st.button("🕵️ Bedah Channel", key=f"stalk_{vid['id']}", use_container_width=True):
+                        st.session_state.stalk_channel = vid['channel_id']
+                        st.session_state.app_mode = "🕵️ Analisis Channel" # Otomatis pindah menu
+                        st.rerun()
 
-                with st.expander("🤖 Ringkasan & SEO Checklist"):
-                    st.caption("🎯 **vidIQ SEO Checklist:**")
-                    st.markdown(f'<div class="desc-box">{"".join([f"<div style=\'font-size:12px; margin-bottom:4px;\'>{check}</div>" for check in vid["seo_checks"]])}</div>', unsafe_allow_html=True)
-                    st.caption("📝 **Ringkasan (Auto):**")
-                    if vid['summary'] and vid['summary'] != ["Deskripsi terlalu pendek."]: st.markdown(f'<div class="desc-box">{"".join([f"<span class=\'summary-bullet\'>• {point}</span>" for point in vid["summary"]])}</div>', unsafe_allow_html=True)
-                    else: st.markdown(f'<div class="desc-box" style="opacity:0.6;">Tidak ada ringkasan.</div>', unsafe_allow_html=True)
-                    st.markdown("---")
-                    c_l, c_r = st.columns(2)
-                    with c_l: st.link_button("▶ Tonton", vid['link'], use_container_width=True)
-                    with c_r:
-                        try: st.download_button("⬇️ Thumb", requests.get(vid['thumbnail']).content, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
-                        except: pass
+                    with st.expander("🤖 Ringkasan & SEO Checklist"):
+                        st.caption("🎯 **vidIQ SEO Checklist:**")
+                        st.markdown(f'<div class="desc-box">{"".join([f"<div style=\'font-size:12px; margin-bottom:4px;\'>{check}</div>" for check in vid["seo_checks"]])}</div>', unsafe_allow_html=True)
+                        st.caption("📝 **Ringkasan (Auto):**")
+                        if vid['summary'] and vid['summary'] != ["Deskripsi terlalu pendek."]: st.markdown(f'<div class="desc-box">{"".join([f"<span class=\'summary-bullet\'>• {point}</span>" for point in vid["summary"]])}</div>', unsafe_allow_html=True)
+                        else: st.markdown(f'<div class="desc-box" style="opacity:0.6;">Tidak ada ringkasan.</div>', unsafe_allow_html=True)
+                        st.markdown("---")
+                        c_l, c_r = st.columns(2)
+                        with c_l: st.link_button("▶ Tonton", vid['link'], use_container_width=True)
+                        with c_r:
+                            try: st.download_button("⬇️ Thumb", requests.get(vid['thumbnail']).content, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
+                            except: pass
+
+# ------------------------------------------
+# HALAMAN 3: ANALISIS CHANNEL (MENU BARU)
+# ------------------------------------------
+elif mode == "🕵️ Analisis Channel":
+    st.title("🕵️ Dasbor Intelijen Channel")
+    
+    # LOGIC 1: Jika user melakukan pencarian channel manual dari Sidebar
+    if 'btn_cari_channel' in locals() and btn_cari_channel and channel_query:
+        st.session_state.stalk_channel = None # Reset dulu
+        with st.spinner(f"Mencari channel dengan nama '{channel_query}'..."):
+            st.session_state.channel_search_results = search_youtube_channels(channel_query)
+            
+    # UI 1: Tampilkan hasil pencarian manual (Grid List Channel)
+    if not st.session_state.stalk_channel and st.session_state.channel_search_results:
+        st.write("### Pilihan Channel:")
+        ch_cols = st.columns(min(len(st.session_state.channel_search_results), 5))
+        for idx, ch in enumerate(st.session_state.channel_search_results[:5]):
+            with ch_cols[idx]:
+                with st.container(border=True):
+                    st.image(ch['thumb'], width=80)
+                    st.markdown(f"**{ch['title'][:20]}**")
+                    st.caption(f"👥 {ch['subs']} | 🎥 {ch['videos']}")
+                    if st.button("Analisis", key=f"btn_anl_{ch['id']}", use_container_width=True):
+                        st.session_state.stalk_channel = ch['id']
+                        st.rerun()
+                        
+    # LOGIC 2 & UI 2: Tampilkan Data Analisis Mendalam (Jika Channel sudah terpilih)
+    if st.session_state.stalk_channel:
+        with st.spinner("Menggali strategi rahasia channel ini..."):
+            ch_data = analyze_channel_deep(st.session_state.stalk_channel)
+            
+        if ch_data:
+            st.markdown(f"""
+<div class="stalker-box" style="border: 2px solid #f43f5e; box-shadow: 0 0 20px rgba(244, 63, 94, 0.2);">
+<div style="display:flex; align-items:center; gap:25px; margin-bottom:25px;">
+<img src="{ch_data['thumb']}" style="border-radius:50%; width:100px; border:4px solid #f43f5e;">
+<div>
+<h1 style="margin:0; color:#f43f5e;">{ch_data['title']}</h1>
+<p style="margin:0; opacity:0.8; font-size:18px;">{ch_data['custom_url']} • <b>{ch_data['subs']}</b> Subscribers • <b>{ch_data['video_count']}</b> Videos</p>
+</div>
+</div>
+<div style="display:flex; gap:15px; margin-bottom:30px;">
+<div style="flex:1; background:rgba(128,128,128,0.1); padding:20px; border-radius:10px; text-align:center;">
+<div style="font-size:28px; font-weight:bold; color:#4ade80;">{ch_data['avg_recent_views']}</div>
+<div style="font-size:14px; opacity:0.7;">Rata-rata Views (15 Video Terakhir)</div>
+</div>
+<div style="flex:1; background:rgba(128,128,128,0.1); padding:20px; border-radius:10px; text-align:center;">
+<div style="font-size:28px; font-weight:bold; color:#facc15;">{ch_data['total_views']}</div>
+<div style="font-size:14px; opacity:0.7;">Total Views Keseluruhan</div>
+</div>
+<div style="flex:1; background:rgba(244, 63, 94, 0.1); padding:20px; border-radius:10px; text-align:center; border: 1px solid rgba(244,63,94,0.3);">
+<div style="font-size:28px; font-weight:bold; color:#f43f5e;">⏰ {ch_data['favorite_upload_hour']}</div>
+<div style="font-size:14px; opacity:0.9; color:#f43f5e;">Pola Jam Upload Favorit</div>
+</div>
+</div>
+<div style="margin-bottom: 25px;">
+<div class="stalker-highlight" style="font-size:18px;">🎯 Strategi SEO Tersembunyi (Top 15 Tags Terbanyak):</div>
+""", unsafe_allow_html=True)
+            
+            if ch_data['top_seo_tags']:
+                tags_html = "".join([f"<span class='seo-chip' style='border-color:#f43f5e; font-size:14px; padding:8px 15px;'>{t[0]}<span class='seo-count' style='background:rgba(244,63,94,0.2); color:#f43f5e;'>{t[1]}x dipakai</span></span>" for t in ch_data['top_seo_tags']])
+                st.markdown(tags_html, unsafe_allow_html=True)
+            else:
+                st.info("Channel ini sangat natural/pelit tag. Mereka jarang menggunakan SEO Tags pada video terbarunya.")
+                
+            st.markdown(f"""
+<hr style="border-color: rgba(128,128,128,0.2); margin-top:30px;">
+<h3 style="margin-bottom:15px;">🎥 5 Video Terakhir Channel Ini:</h3>
+</div>
+""", unsafe_allow_html=True)
+
+            sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+            for i, vid in enumerate(ch_data['recent_videos']):
+                with [sc1, sc2, sc3, sc4, sc5][i]:
+                    st.image(vid['thumb'], use_container_width=True)
+                    st.caption(f"📅 {vid['date']}")
+                    st.markdown(f"**👁️ {vid['views']} Views**")
+                    st.markdown(f"<span style='font-size:12px; opacity:0.8;'>{vid['title']}</span>", unsafe_allow_html=True)
+                    
+        else:
+            st.error("Gagal menarik data mendalam untuk channel ini. Mungkin ID tidak valid atau sedang dibatasi oleh YouTube.")
+            
+    elif not st.session_state.channel_search_results:
+        st.info("👈 Silakan gunakan menu **Pencarian Channel** di sidebar kiri untuk mencari nama YouTuber yang ingin dianalisis, atau gunakan tombol **'Bedah Channel'** saat sedang meriset video.")
