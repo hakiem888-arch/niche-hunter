@@ -13,7 +13,7 @@ from pytrends.request import TrendReq
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V12.0 (Directory)", layout="wide", page_icon="🏢")
+st.set_page_config(page_title="Pro Niche Finder V13.0 (Smart Filter)", layout="wide", page_icon="🏢")
 
 # --- API KEY SETUP ---
 try:
@@ -89,26 +89,49 @@ st.markdown("""
 # 4. FUNGSI LOGIKA (BACKEND)
 # ==========================================
 
-def search_youtube_channels(query, max_results=5):
+# --- UPDATE V13.0: FUNGSI PENCARIAN CHANNEL DIPERKUAT ---
+def search_youtube_channels(query, max_results=20, min_subs=0, sort_by="relevance"):
     try:
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
-        res = youtube.search().list(q=query, type='channel', part='snippet', maxResults=max_results).execute()
+        
+        # 1. Tarik jaring lebih luas (maks 50 untuk berjaga-jaga disortir)
+        fetch_limit = min(50, max_results * 3) if min_subs > 0 else max_results
+        res = youtube.search().list(q=query, type='channel', part='snippet', maxResults=fetch_limit).execute()
         ch_ids = [item['snippet']['channelId'] for item in res.get('items', [])]
         
         if not ch_ids: return []
         
+        # 2. Ambil statistik lengkap untuk semua channel mentah
         stats_res = youtube.channels().list(id=','.join(ch_ids), part='snippet,statistics').execute()
         channels = []
+        
         for item in stats_res.get('items', []):
-            channels.append({
-                'id': item['id'],
-                'title': item['snippet']['title'],
-                'thumb': item['snippet']['thumbnails'].get('medium', item['snippet']['thumbnails'].get('default', {}))['url'],
-                'subs': format_number(int(item['statistics'].get('subscriberCount', 0))),
-                'videos': format_number(int(item['statistics'].get('videoCount', 0)))
-            })
-        return channels
-    except: return []
+            subs_count = int(item['statistics'].get('subscriberCount', 0))
+            vid_count = int(item['statistics'].get('videoCount', 0))
+            
+            # 3. FILTERING: Buang channel yang subs-nya di bawah batas minimal
+            if subs_count >= min_subs:
+                channels.append({
+                    'id': item['id'],
+                    'title': item['snippet']['title'],
+                    'thumb': item['snippet']['thumbnails'].get('medium', item['snippet']['thumbnails'].get('default', {}))['url'],
+                    'subs': format_number(subs_count),
+                    'raw_subs': subs_count,
+                    'videos': format_number(vid_count),
+                    'raw_videos': vid_count
+                })
+                
+        # 4. SORTING: Urutkan data yang sudah bersih sesuai permintaan
+        if sort_by == "Paling Populer (Subs)":
+            channels = sorted(channels, key=lambda x: x['raw_subs'], reverse=True)
+        elif sort_by == "Paling Aktif (Video)":
+            channels = sorted(channels, key=lambda x: x['raw_videos'], reverse=True)
+            
+        # Kembalikan hanya sejumlah yang diminta
+        return channels[:max_results]
+    except Exception as e: 
+        print(e)
+        return []
 
 def get_youtube_suggestions(query):
     if not query or len(query) < 2: return []
@@ -382,7 +405,6 @@ if 'compare_list' not in st.session_state: st.session_state.compare_list = []
 with st.sidebar:
     st.title("🎛️ Menu Navigasi")
     
-    # --- 5 MENU UTAMA ---
     mode = st.radio("Pilih Mode:", [
         "🔍 Pencarian Video", 
         "🔥 Trending (Viral)", 
@@ -435,9 +457,10 @@ with st.sidebar:
         max_res = st.slider("Jumlah Video Ditampilkan", min_value=5, max_value=50, value=12, step=1)
         btn_trending = st.button("🔥 Lihat Trending", type="primary", use_container_width=True)
 
+    # --- UI BARU UNTUK FILTER DIREKTORI CHANNEL ---
     elif mode == "🧭 Direktori Channel":
         st.header("⚙️ Filter Direktori")
-        st.info("Pilih kategori di menu utama untuk mencari inspirasi channel.")
+        st.info("Pilih kategori dan atur filter di menu utama.")
 
     elif mode == "🕵️ Analisis Channel":
         st.header("⚙️ Pencarian Spesifik")
@@ -461,7 +484,6 @@ with st.sidebar:
 # 6. LOGIKA HALAMAN UTAMA
 # ==========================================
 
-# --- MODE PENCARIAN VIDEO & TRENDING ---
 if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
     st.title(f"🚀 Niche Hunter: {mode.replace('🔍 ', '').replace('🔥 ', '')}")
 
@@ -573,10 +595,10 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                             try: st.download_button("⬇️ Thumb", requests.get(vid['thumbnail']).content, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
                             except: pass
 
-# --- MODE BARU: DIREKTORI CHANNEL ---
+# --- UPDATE V13.0: MODE DIREKTORI DENGAN FILTER & SORTING ---
 elif mode == "🧭 Direktori Channel":
     st.title("🧭 Direktori & Inspirasi Channel")
-    st.write("Cari referensi channel teratas berdasarkan topik atau niche untuk dipelajari strateginya.")
+    st.write("Cari dan sortir channel teratas berdasarkan niche atau topik spesifik.")
     
     preset_niches = [
         "Podcast & Talkshow Indonesia",
@@ -591,28 +613,49 @@ elif mode == "🧭 Direktori Channel":
         "Ketik Niche Sendiri..."
     ]
     
-    selected_niche = st.selectbox("Pilih Kategori/Niche:", preset_niches)
-    search_niche_query = selected_niche
-    
-    if selected_niche == "Ketik Niche Sendiri...":
-        search_niche_query = st.text_input("Ketik niche atau topik:", placeholder="Misal: Tutorial merajut pemula")
+    # UI Filter Tambahan
+    with st.container(border=True):
+        c_niche, c_sort = st.columns([2, 1])
+        with c_niche:
+            selected_niche = st.selectbox("Pilih Kategori/Niche:", preset_niches)
+            search_niche_query = selected_niche
+            if selected_niche == "Ketik Niche Sendiri...":
+                search_niche_query = st.text_input("Ketik niche atau topik:", placeholder="Misal: Tutorial merajut pemula")
         
-    if st.button("🔍 Temukan Channel Top", type="primary", use_container_width=True):
+        with c_sort:
+            sort_channel = st.selectbox("Urutkan Berdasarkan:", ["Relevansi", "Paling Populer (Subs)", "Paling Aktif (Video)"])
+        
+        # Slider Filter Minimal Subs
+        min_subs_filter = st.select_slider(
+            "Filter Minimal Subscribers:",
+            options=[0, 1000, 10000, 50000, 100000, 500000, 1000000],
+            value=0,
+            format_func=lambda x: "Tanpa Batas" if x == 0 else f"{x:,}".replace(",", ".")
+        )
+            
+        btn_cari_dir = st.button("🔍 Temukan Channel Top", type="primary", use_container_width=True)
+        
+    if btn_cari_dir:
         if search_niche_query and search_niche_query != "Ketik Niche Sendiri...":
-            with st.spinner(f"Mencari top channel untuk niche '{search_niche_query}'..."):
-                # Kita ambil 12 channel sekaligus
-                st.session_state.dir_results = search_youtube_channels(search_niche_query, max_results=12)
+            with st.spinner(f"Memfilter channel untuk niche '{search_niche_query}'..."):
+                # Masukkan filter ke fungsi baru
+                st.session_state.dir_results = search_youtube_channels(
+                    search_niche_query, 
+                    max_results=12, 
+                    min_subs=min_subs_filter, 
+                    sort_by=sort_channel
+                )
                 
     if st.session_state.dir_results:
         st.markdown("---")
-        st.write(f"### Hasil Temuan Channel untuk: **{search_niche_query}**")
+        st.write(f"### Ditemukan {len(st.session_state.dir_results)} Channel untuk: **{search_niche_query}**")
         
         cols = st.columns(4)
         for idx, ch in enumerate(st.session_state.dir_results):
             with cols[idx % 4]:
                 with st.container(border=True):
-                    st.markdown(f"<div style='text-align:center;'><img src='{ch['thumb']}' style='border-radius:50%; width:80px; margin-bottom:10px;'></div>", unsafe_allow_html=True)
-                    st.markdown(f"<h4 style='text-align:center; margin:0; font-size:15px;'>{ch['title']}</h4>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='text-align:center;'><a href='https://youtube.com/channel/{ch['id']}' target='_blank'><img src='{ch['thumb']}' style='border-radius:50%; width:80px; margin-bottom:10px; border:2px solid #0ea5e9;'></a></div>", unsafe_allow_html=True)
+                    st.markdown(f"<h4 style='text-align:center; margin:0; font-size:15px; height:45px; overflow:hidden;'>{ch['title']}</h4>", unsafe_allow_html=True)
                     st.markdown(f"<p style='text-align:center; font-size:12px; opacity:0.8;'>👥 {ch['subs']} | 🎥 {ch['videos']}</p>", unsafe_allow_html=True)
                     
                     c_btn1, c_btn2 = st.columns(2)
@@ -702,6 +745,9 @@ elif mode == "🕵️ Analisis Channel":
                     
         else:
             st.error("Gagal menarik data mendalam untuk channel ini. Mungkin ID tidak valid atau sedang dibatasi oleh YouTube.")
+            
+    elif not st.session_state.channel_search_results:
+        st.info("👈 Silakan gunakan menu **Pencarian Channel** di sidebar kiri untuk mencari nama YouTuber yang ingin dianalisis, atau gunakan tombol **'Bedah Channel'** saat sedang meriset video.")
 
 # --- MODE BANDINGKAN CHANNEL ---
 elif mode == "⚖️ Bandingkan Channel":
