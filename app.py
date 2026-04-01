@@ -14,7 +14,7 @@ from dateutil.relativedelta import relativedelta
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V16.0", layout="wide", page_icon="🏢")
+st.set_page_config(page_title="Pro Niche Finder V17.0", layout="wide", page_icon="🏢")
 
 # --- API KEY SETUP ---
 try:
@@ -111,6 +111,15 @@ st.markdown("""
 # 4. FUNGSI LOGIKA (BACKEND)
 # ==========================================
 
+# --- FIX: PENYARING TANGGAL YOUTUBE (ANTI CRASH) ---
+def parse_yt_date(date_str):
+    try:
+        # Hapus milidetik jika API YouTube sedang error
+        clean_date = re.sub(r'\.\d+', '', date_str)
+        return datetime.strptime(clean_date, "%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return datetime.utcnow()
+
 def format_number(num):
     if num >= 1000000: return f"{num/1000000:.1f}M"
     if num >= 1000: return f"{num/1000:.1f}K"
@@ -118,7 +127,7 @@ def format_number(num):
 
 def calculate_channel_age(published_at):
     try:
-        pub_date = datetime.strptime(published_at, "%Y-%m-%dT%H:%M:%SZ")
+        pub_date = parse_yt_date(published_at)
         now = datetime.utcnow()
         diff = relativedelta(now, pub_date)
         years_decimal = diff.years + (diff.months / 12.0)
@@ -148,6 +157,7 @@ def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Ter
         
         stats_res = youtube.channels().list(id=','.join(ch_ids), part='snippet,statistics').execute()
         channels = []
+        
         for item in stats_res.get('items', []):
             subs_count = int(item['statistics'].get('subscriberCount', 0))
             vid_count = int(item['statistics'].get('videoCount', 0))
@@ -165,7 +175,7 @@ def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Ter
                 'raw_videos': vid_count,
                 'total_views': format_number(total_views),
                 'raw_total_views': total_views,
-                'published_at_str': datetime.strptime(published_at, "%Y-%m-%dT%H:%M:%SZ").strftime("%d %b %Y"),
+                'published_at_str': parse_yt_date(published_at).strftime("%d %b %Y"),
                 'age': calculate_channel_age(published_at),
                 'avg_views': fetch_channel_recent_avg_views(youtube, item['id']) 
             })
@@ -179,7 +189,7 @@ def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Ter
             
         return channels[:max_results]
     except Exception as e: 
-        st.error(f"❌ Terjadi kesalahan saat menarik data dari YouTube. Kemungkinan Kuota API harianmu sudah habis. Detail: {str(e)}")
+        st.error(f"❌ Terjadi kesalahan API YouTube. Detail: {str(e)}")
         return []
 
 def get_youtube_suggestions(query):
@@ -196,7 +206,7 @@ def estimate_best_time(results):
     times = []
     for r in results:
         try:
-            dt = datetime.strptime(r['published_full'], "%Y-%m-%dT%H:%M:%SZ") + timedelta(hours=7) 
+            dt = parse_yt_date(r['published_full']) + timedelta(hours=7) 
             times.append(dt)
         except: pass
     if not times: return "Data tidak cukup"
@@ -232,7 +242,7 @@ def generate_ai_ideas(niche_query):
 
 def calculate_vph(published_at_str, current_views):
     try:
-        pub_date = datetime.strptime(published_at_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        pub_date = parse_yt_date(published_at_str).replace(tzinfo=timezone.utc)
         hours = (datetime.now(timezone.utc) - pub_date).total_seconds() / 3600
         return int(current_views / max(hours, 1))
     except: return 0
@@ -300,7 +310,7 @@ def analyze_channel_deep(channel_id):
                 snippet = item['snippet']
                 views = int(item['statistics'].get('viewCount', 0))
                 try:
-                    pub_dt = datetime.strptime(snippet['publishedAt'], "%Y-%m-%dT%H:%M:%SZ") + timedelta(hours=7)
+                    pub_dt = parse_yt_date(snippet['publishedAt']) + timedelta(hours=7)
                     upload_hours.append(pub_dt.hour)
                 except: pass
                 
@@ -641,26 +651,28 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                             try: st.download_button("⬇️ Thumb", requests.get(vid['thumbnail']).content, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
                             except: pass
 
+# --- UPDATE V17.0: MODE DIREKTORI (FILTER AMAN & TANPA FORM) ---
 elif mode == "🧭 Direktori Channel":
     st.markdown("<h1 style='text-align: center;'>Temukan Niche Besar<br>Anda Selanjutnya</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #888; font-size:14px; margin-bottom:40px;'>Analisis top channel YouTube, temukan tren terbaru, dan dapatkan ide konten viral dengan bantuan AI.</p>", unsafe_allow_html=True)
     
-    with st.form("dir_search_form"):
-        col1, col2, col3, col4 = st.columns([1, 4, 1, 1])
-        with col2:
-            search_niche_query = st.text_input("Search", placeholder="🔍 cover musik", label_visibility="collapsed")
-        with col3:
-            use_filter = st.checkbox("⚙️ Filter", value=False)
-        with col4:
-            btn_cari_dir = st.form_submit_button("Cari Channel", use_container_width=True)
+    col1, col2, col3, col4 = st.columns([1, 4, 1, 1])
+    with col2:
+        search_niche_query = st.text_input("Search", placeholder="🔍 cover musik", label_visibility="collapsed")
+    with col3:
+        use_filter = st.checkbox("⚙️ Filter", value=False)
+    with col4:
+        btn_cari_dir = st.button("Cari Channel", type="primary", use_container_width=True)
 
-        sort_channel = "Banyak Ditonton (Teratas)"
-        
-        if use_filter:
+    sort_channel = "Banyak Ditonton (Teratas)"
+    min_subs_filter = 0
+    
+    if use_filter:
+        with st.container(border=True):
             st.markdown("##### ⚙️ Filter Pencarian")
             f1, f2 = st.columns(2)
             with f1:
-                st.selectbox("Subscribers", ["Semua"])
+                min_subs_filter = st.selectbox("Subscribers", options=[0, 10000, 100000, 1000000], format_func=lambda x: "Semua" if x==0 else f"> {int(x/1000)}K" if x < 1000000 else f"> {int(x/1000000)}M")
                 st.selectbox("Views / Jam (VPH) [Coming Soon]", ["Semua"])
             with f2:
                 st.selectbox("Umur Channel [Coming Soon]", ["Semua"])
@@ -668,7 +680,11 @@ elif mode == "🧭 Direktori Channel":
 
     if btn_cari_dir and search_niche_query:
         with st.spinner(f"Mencari channel teratas untuk '{search_niche_query}'..."):
-            st.session_state.dir_results = search_youtube_channels(search_niche_query, max_results=20, sort_by=sort_channel)
+            st.session_state.dir_results = search_youtube_channels(
+                search_niche_query, 
+                max_results=20, 
+                sort_by=sort_channel
+            )
                 
     if st.session_state.dir_results:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -699,8 +715,7 @@ elif mode == "🧭 Direktori Channel":
 </div>
 </div>
 <div class="ch-header-icons">
-<a href="#" title="Simpan">♡</a>
-<a href="{safe_url}" target="_blank" title="Buka Channel">↗</a>
+<a href="{safe_url}" target="_blank" title="Buka Channel">🔗</a>
 </div>
 </div>
 <div class="ch-metrics-grid">
@@ -734,6 +749,7 @@ elif mode == "🧭 Direktori Channel":
                 with c_b2: st.button("⚖️ Banding", key=f"dir_comp_{ch['id']}", on_click=add_to_compare_and_go, args=(ch['id'],), use_container_width=True)
                 st.markdown("<br>", unsafe_allow_html=True)
 
+# --- MODE ANALISIS CHANNEL (SATUAN) ---
 elif mode == "🕵️ Analisis Channel":
     st.title("🕵️ Dasbor Intelijen Channel")
     
@@ -744,6 +760,7 @@ elif mode == "🕵️ Analisis Channel":
             
     if not st.session_state.stalk_channel and st.session_state.channel_search_results:
         st.write("### Pilihan Channel:")
+        
         ch_cols = st.columns(min(len(st.session_state.channel_search_results), 5))
         for idx, ch in enumerate(st.session_state.channel_search_results[:5]):
             with ch_cols[idx]:
@@ -759,7 +776,7 @@ elif mode == "🕵️ Analisis Channel":
 </div>
 </div>
 <div class="ch-header-icons">
-<a href="{safe_url}" target="_blank" title="Buka Channel">↗</a>
+<a href="{safe_url}" target="_blank" title="Buka Channel">🔗</a>
 </div>
 </div>
 <div class="ch-metrics-grid">
