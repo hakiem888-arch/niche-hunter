@@ -14,7 +14,7 @@ from dateutil.relativedelta import relativedelta
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V17.0", layout="wide", page_icon="🏢")
+st.set_page_config(page_title="Pro Niche Finder V18.0", layout="wide", page_icon="🏢")
 
 # --- API KEY SETUP ---
 try:
@@ -84,26 +84,38 @@ st.markdown("""
     .stButton > button[kind="secondary"]:hover { background: rgba(14, 165, 233, 0.1); }
     .stalker-highlight { font-size: 16px; font-weight: bold; color: #f43f5e; margin-bottom: 5px; }
     
-    /* CSS DASHBOARD CHANNEL (DARK) */
-    .ch-card { background-color: #161618; border-radius: 12px; padding: 20px; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.3); margin-bottom: 10px; height: 100%; display: flex; flex-direction: column; justify-content: space-between;}
+    /* CSS DASHBOARD CHANNEL ADAPTIVE (TERANG/GELAP BISA) */
+    .ch-card { 
+        background-color: var(--secondary-background-color); 
+        border-radius: 12px; 
+        padding: 20px; 
+        color: var(--text-color); 
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1); 
+        margin-bottom: 15px; 
+        height: 100%; 
+        display: flex; 
+        flex-direction: column; 
+        justify-content: space-between;
+        border: 1px solid rgba(128, 128, 128, 0.2);
+    }
     .ch-card-header { display: flex; justify-content: space-between; margin-bottom: 20px; align-items: flex-start; }
-    .ch-header-left { display: flex; gap: 12px; align-items: center; }
-    .ch-avatar { width: 45px; height: 45px; border-radius: 50%; object-fit: cover; border: 1px solid #333; }
-    .ch-title-wrap { display: flex; flex-direction: column; }
-    .ch-title { font-size: 15px; font-weight: 700; margin: 0; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
-    .ch-handle { font-size: 11px; color: #a1a1aa; margin: 0; font-weight: 500;}
-    .ch-header-icons { display: flex; gap: 8px; color: #a1a1aa; font-size: 16px; }
-    .ch-header-icons a { color: #a1a1aa; text-decoration: none; transition: color 0.2s; }
-    .ch-header-icons a:hover { color: white; }
+    .ch-header-left { display: flex; gap: 15px; align-items: center; width: 85%; }
+    .ch-avatar { width: 55px; height: 55px; border-radius: 50%; object-fit: cover; border: 1px solid rgba(128, 128, 128, 0.3); }
+    .ch-title-wrap { display: flex; flex-direction: column; width: 100%; }
+    .ch-title { font-size: 16px; font-weight: 800; margin: 0; color: var(--text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.2;}
+    .ch-handle { font-size: 12px; color: var(--text-color); opacity: 0.7; margin: 0; font-weight: 500;}
+    .ch-header-icons { display: flex; gap: 8px; color: var(--text-color); opacity: 0.6; font-size: 18px; }
+    .ch-header-icons a { color: var(--text-color); text-decoration: none; transition: opacity 0.2s; }
+    .ch-header-icons a:hover { opacity: 1; }
     
     .ch-metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 25px; }
     .ch-metric-item { text-align: center; }
-    .ch-metric-label { font-size: 9px; color: #a1a1aa; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px; text-transform: uppercase; }
-    .ch-metric-value { font-size: 17px; font-weight: 800; color: white; margin: 0; }
+    .ch-metric-label { font-size: 10px; color: var(--text-color); opacity: 0.8; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px; text-transform: uppercase; }
+    .ch-metric-value { font-size: 20px; font-weight: 800; color: var(--text-color); margin: 0; }
     
-    .ch-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #27272a; padding-top: 12px; font-size: 10px; color: #a1a1aa; font-weight: 500;}
-    .ch-age { color: #ef4444; font-weight: 800; font-size: 10px; }
-    .ch-age-green { color: #10b981; font-weight: 800; font-size: 10px; }
+    .ch-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(128, 128, 128, 0.2); padding-top: 12px; font-size: 11px; color: var(--text-color); opacity: 0.8; font-weight: 500;}
+    .ch-age { color: #ef4444; font-weight: 800; font-size: 11px; opacity: 1;}
+    .ch-age-green { color: #10b981; font-weight: 800; font-size: 11px; opacity: 1;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -111,10 +123,8 @@ st.markdown("""
 # 4. FUNGSI LOGIKA (BACKEND)
 # ==========================================
 
-# --- FIX: PENYARING TANGGAL YOUTUBE (ANTI CRASH) ---
 def parse_yt_date(date_str):
     try:
-        # Hapus milidetik jika API YouTube sedang error
         clean_date = re.sub(r'\.\d+', '', date_str)
         return datetime.strptime(clean_date, "%Y-%m-%dT%H:%M:%SZ")
     except Exception:
@@ -347,7 +357,7 @@ def analyze_channel_deep(channel_id):
             'top_seo_tags': top_tags
         }
     except Exception as e:
-        st.error(f"❌ Gagal membedah channel. Kuota API YouTube mungkin habis. Detail: {str(e)}")
+        st.error(f"❌ Gagal membedah channel. Detail: {str(e)}")
         return None
 
 def process_video_response(items, youtube, region_code):
@@ -415,7 +425,7 @@ def search_youtube(query, region_code='ID', duration='any', category_id=None, pu
         elif sort_order == 'seo_custom': return sorted(results, key=lambda x: x['seo_score'], reverse=True)
         return results
     except Exception as e:
-        st.error(f"❌ Terjadi kesalahan API YouTube. Kemungkinan limit kuota harian habis. Detail: {e}")
+        st.error(f"❌ Terjadi kesalahan API YouTube. Detail: {e}")
         return []
 
 def get_trending_videos(region_code='ID', category_id=None, max_results=12):
@@ -445,6 +455,9 @@ def remove_from_compare(channel_id):
     if channel_id in st.session_state.compare_list:
         st.session_state.compare_list.remove(channel_id)
 
+def execute_dir_search():
+    st.session_state.do_dir_search = True
+
 # ==========================================
 # 5. UI FRONTEND & STATE MANAGEMENT
 # ==========================================
@@ -459,6 +472,7 @@ if 'best_time' not in st.session_state: st.session_state.best_time = None
 if 'rising_trends' not in st.session_state: st.session_state.rising_trends = None
 if 'channel_search_results' not in st.session_state: st.session_state.channel_search_results = []
 if 'compare_list' not in st.session_state: st.session_state.compare_list = []
+if 'do_dir_search' not in st.session_state: st.session_state.do_dir_search = False
 
 with st.sidebar:
     st.title("🎛️ Menu Navigasi")
@@ -651,7 +665,7 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                             try: st.download_button("⬇️ Thumb", requests.get(vid['thumbnail']).content, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
                             except: pass
 
-# --- UPDATE V17.0: MODE DIREKTORI (FILTER AMAN & TANPA FORM) ---
+# --- MODE DIREKTORI CHANNEL (ADAPTIVE UI) ---
 elif mode == "🧭 Direktori Channel":
     st.markdown("<h1 style='text-align: center;'>Temukan Niche Besar<br>Anda Selanjutnya</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #888; font-size:14px; margin-bottom:40px;'>Analisis top channel YouTube, temukan tren terbaru, dan dapatkan ide konten viral dengan bantuan AI.</p>", unsafe_allow_html=True)
@@ -662,7 +676,7 @@ elif mode == "🧭 Direktori Channel":
     with col3:
         use_filter = st.checkbox("⚙️ Filter", value=False)
     with col4:
-        btn_cari_dir = st.button("Cari Channel", type="primary", use_container_width=True)
+        st.button("Cari Channel", type="primary", on_click=execute_dir_search, use_container_width=True)
 
     sort_channel = "Banyak Ditonton (Teratas)"
     min_subs_filter = 0
@@ -678,18 +692,16 @@ elif mode == "🧭 Direktori Channel":
                 st.selectbox("Umur Channel [Coming Soon]", ["Semua"])
                 sort_channel = st.selectbox("Urutkan Berdasarkan", ["Banyak Ditonton (Teratas)", "Subscriber Terbanyak", "Video Terbanyak"])
 
-    if btn_cari_dir and search_niche_query:
-        with st.spinner(f"Mencari channel teratas untuk '{search_niche_query}'..."):
-            st.session_state.dir_results = search_youtube_channels(
-                search_niche_query, 
-                max_results=20, 
-                sort_by=sort_channel
-            )
+    if st.session_state.do_dir_search:
+        if search_niche_query:
+            with st.spinner(f"Mencari channel teratas untuk '{search_niche_query}'..."):
+                st.session_state.dir_results = search_youtube_channels(search_niche_query, max_results=20, sort_by=sort_channel)
+        st.session_state.do_dir_search = False
                 
     if st.session_state.dir_results:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown(f"""
-<div style='display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 20px;'>
+<div style='display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 1px solid rgba(128, 128, 128, 0.2); padding-bottom: 10px; margin-bottom: 20px;'>
 <h3 style='margin:0; font-size:20px;'>Analisis Channel Teratas</h3>
 <span style='font-size:12px; color:#888;'>{len(st.session_state.dir_results)} channel ditemukan</span>
 </div>
@@ -704,7 +716,7 @@ elif mode == "🧭 Direktori Channel":
                 safe_url = f"https://youtube.com/channel/{ch['id']}"
                 
                 st.markdown(f"""
-<div class="ch-card" style="border-top-color: {color};">
+<div class="ch-card" style="border-top: 4px solid {color};">
 <div>
 <div class="ch-card-header">
 <div class="ch-header-left">
@@ -739,7 +751,7 @@ elif mode == "🧭 Direktori Channel":
 </div>
 <div class="ch-footer">
 <span>📅 Dibuat: {ch['published_at_str']}</span>
-<span style="color: {age_color}; font-weight: 800; font-size: 10px;">{age_text}</span>
+<span style="color: {age_color}; font-weight: 800; font-size: 11px;">{age_text}</span>
 </div>
 </div>
 """, unsafe_allow_html=True)
@@ -766,7 +778,7 @@ elif mode == "🕵️ Analisis Channel":
             with ch_cols[idx]:
                 safe_url = f"https://youtube.com/channel/{ch['id']}"
                 st.markdown(f"""
-<div class="ch-card" style="border-top-color: #0ea5e9;">
+<div class="ch-card" style="border-top: 4px solid #0ea5e9;">
 <div class="ch-card-header">
 <div class="ch-header-left">
 <img src="{ch['thumb']}" class="ch-avatar">
@@ -806,7 +818,7 @@ elif mode == "🕵️ Analisis Channel":
 <div style="display:flex; align-items:center; gap:25px; margin-bottom:25px;">
 <img src="{ch_data['thumb']}" style="border-radius:50%; width:100px; border:4px solid #f43f5e;">
 <div>
-<h1 style="margin:0; color:#f43f5e; display:flex; align-items:center; gap:10px;">{ch_data['title']} <a href="{safe_url}" target="_blank" title="Klik Kanan -> Copy Link" style="text-decoration:none; font-size:26px; color:var(--text-color); opacity:0.4;">🔗</a></h1>
+<h1 style="margin:0; color:#f43f5e; display:flex; align-items:center; gap:10px;">{ch_data['title']} <a href="{safe_url}" target="_blank" title="Buka Channel" style="text-decoration:none; font-size:26px; color:var(--text-color); opacity:0.4;">🔗</a></h1>
 <p style="margin:0; opacity:0.8; font-size:18px;">{ch_data['custom_url']} • <b>{ch_data['subs']}</b> Subscribers • <b>{ch_data['video_count']}</b> Videos</p>
 </div>
 </div>
@@ -873,7 +885,7 @@ elif mode == "⚖️ Bandingkan Channel":
 <div style="display:flex; align-items:center; gap:15px; margin-bottom:15px;">
 <img src="{ch_data['thumb']}" style="border-radius:50%; width:70px; border:3px solid #8b5cf6;">
 <div>
-<h3 style="margin:0; color:#8b5cf6; font-size:18px; display:flex; align-items:center; gap:8px;">{ch_data['title']} <a href="{safe_comp_url}" target="_blank" title="Klik Kanan -> Copy Link" style="text-decoration:none; font-size:18px; color:var(--text-color); opacity:0.4;">🔗</a></h3>
+<h3 style="margin:0; color:#8b5cf6; font-size:18px; display:flex; align-items:center; gap:8px;">{ch_data['title']} <a href="{safe_comp_url}" target="_blank" title="Buka Channel" style="text-decoration:none; font-size:18px; color:var(--text-color); opacity:0.4;">🔗</a></h3>
 <p style="margin:0; opacity:0.8; font-size:12px;"><b>{ch_data['subs']}</b> Subs • <b>{ch_data['video_count']}</b> Vids</p>
 </div>
 </div>
