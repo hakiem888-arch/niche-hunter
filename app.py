@@ -55,8 +55,6 @@ LICENSE_OPTIONS = {
     "Semua Lisensi": None, "Creative Commons": "creativeCommon", "Youtube Standar": "youtube"
 }
 
-CARD_COLORS = ["#f43f5e", "#fbbf24", "#10b981", "#0ea5e9", "#8b5cf6"]
-
 # ==========================================
 # 3. CUSTOM CSS
 # ==========================================
@@ -84,38 +82,36 @@ st.markdown("""
     .stButton > button[kind="secondary"]:hover { background: rgba(14, 165, 233, 0.1); }
     .stalker-highlight { font-size: 16px; font-weight: bold; color: #f43f5e; margin-bottom: 5px; }
     
-    /* CSS DASHBOARD CHANNEL ADAPTIVE (TERANG/GELAP BISA) */
+    /* CSS DASHBOARD CHANNEL ADAPTIVE (FONT JUMBO) */
     .ch-card { 
         background-color: var(--secondary-background-color); 
         border-radius: 12px; 
-        padding: 20px; 
+        padding: 24px; 
         color: var(--text-color); 
-        box-shadow: 0 2px 6px rgba(0,0,0,0.1); 
+        box-shadow: 0 4px 10px rgba(0,0,0,0.15); 
         margin-bottom: 15px; 
         height: 100%; 
         display: flex; 
         flex-direction: column; 
         justify-content: space-between;
-        border: 1px solid rgba(128, 128, 128, 0.2);
+        border: 1px solid rgba(128, 128, 128, 0.1);
     }
-    .ch-card-header { display: flex; justify-content: space-between; margin-bottom: 20px; align-items: flex-start; }
-    .ch-header-left { display: flex; gap: 15px; align-items: center; width: 85%; }
-    .ch-avatar { width: 55px; height: 55px; border-radius: 50%; object-fit: cover; border: 1px solid rgba(128, 128, 128, 0.3); }
+    .ch-card-header { display: flex; justify-content: space-between; margin-bottom: 24px; align-items: flex-start; }
+    .ch-header-left { display: flex; gap: 16px; align-items: center; width: 85%; }
+    .ch-avatar { width: 65px; height: 65px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(128, 128, 128, 0.2); }
     .ch-title-wrap { display: flex; flex-direction: column; width: 100%; }
-    .ch-title { font-size: 16px; font-weight: 800; margin: 0; color: var(--text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.2;}
-    .ch-handle { font-size: 12px; color: var(--text-color); opacity: 0.7; margin: 0; font-weight: 500;}
-    .ch-header-icons { display: flex; gap: 8px; color: var(--text-color); opacity: 0.6; font-size: 18px; }
+    .ch-title { font-size: 20px; font-weight: 800; margin: 0; color: var(--text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.2;}
+    .ch-handle { font-size: 14px; color: var(--text-color); opacity: 0.7; margin: 0; font-weight: 500; margin-top: 4px;}
+    .ch-header-icons { display: flex; gap: 8px; color: var(--text-color); opacity: 0.6; font-size: 22px; }
     .ch-header-icons a { color: var(--text-color); text-decoration: none; transition: opacity 0.2s; }
     .ch-header-icons a:hover { opacity: 1; }
     
-    .ch-metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 25px; }
+    .ch-metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
     .ch-metric-item { text-align: center; }
-    .ch-metric-label { font-size: 10px; color: var(--text-color); opacity: 0.8; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px; text-transform: uppercase; }
-    .ch-metric-value { font-size: 20px; font-weight: 800; color: var(--text-color); margin: 0; }
+    .ch-metric-label { font-size: 11px; color: var(--text-color); opacity: 0.7; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; text-transform: uppercase; }
+    .ch-metric-value { font-size: 24px; font-weight: 900; color: var(--text-color); margin: 0; }
     
-    .ch-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(128, 128, 128, 0.2); padding-top: 12px; font-size: 11px; color: var(--text-color); opacity: 0.8; font-weight: 500;}
-    .ch-age { color: #ef4444; font-weight: 800; font-size: 11px; opacity: 1;}
-    .ch-age-green { color: #10b981; font-weight: 800; font-size: 11px; opacity: 1;}
+    .ch-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(128, 128, 128, 0.2); padding-top: 16px; font-size: 13px; color: var(--text-color); opacity: 0.8; font-weight: 500;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -123,6 +119,7 @@ st.markdown("""
 # 4. FUNGSI LOGIKA (BACKEND)
 # ==========================================
 
+# --- ANTI CRASH YOUTUBE DATE PARSER ---
 def parse_yt_date(date_str):
     try:
         clean_date = re.sub(r'\.\d+', '', date_str)
@@ -135,71 +132,132 @@ def format_number(num):
     if num >= 1000: return f"{num/1000:.1f}K"
     return str(num)
 
-def calculate_channel_age(published_at):
+# --- FUNGSI MENGAMBIL METRIK LANJUTAN DENGAN HEMAT KUOTA (97% LEBIH IRIT) ---
+def fetch_channel_recent_metrics(youtube, uploads_playlist_id):
     try:
-        pub_date = parse_yt_date(published_at)
-        now = datetime.utcnow()
-        diff = relativedelta(now, pub_date)
-        years_decimal = diff.years + (diff.months / 12.0)
-        if years_decimal >= 1: return f"{years_decimal:.1f} THN"
-        elif diff.months > 0: return f"{diff.months} BLN"
-        else: return f"{diff.days} HR"
-    except: return "N/A"
+        # Ambil 5 video dari playlist uploads (sangat hemat kuota)
+        pl_res = youtube.playlistItems().list(playlistId=uploads_playlist_id, part='snippet', maxResults=5).execute()
+        vid_ids = [item['snippet']['resourceId']['videoId'] for item in pl_res.get('items', [])]
+        
+        if not vid_ids: return 0, 0
+        
+        # Ambil statistik 5 video tersebut
+        vid_res = youtube.videos().list(id=','.join(vid_ids), part='statistics,snippet').execute()
+        
+        total_views = 0
+        total_vph = 0
+        count = 0
+        
+        for v in vid_res.get('items', []):
+            views = int(v['statistics'].get('viewCount', 0))
+            pub_str = v['snippet']['publishedAt']
+            pub_date = parse_yt_date(pub_str).replace(tzinfo=timezone.utc)
+            hours_ago = max((datetime.now(timezone.utc) - pub_date).total_seconds() / 3600, 1)
+            
+            vph = views / hours_ago
+            total_views += views
+            total_vph += vph
+            count += 1
+            
+        if count == 0: return 0, 0
+        return (total_views / count), (total_vph / count)
+    except Exception as e:
+        return 0, 0
 
-def fetch_channel_recent_avg_views(youtube, channel_id):
-    try:
-        res = youtube.search().list(channelId=channel_id, part='id', type='video', order='date', maxResults=5).execute()
-        vid_ids = [item['id']['videoId'] for item in res.get('items', []) if 'videoId' in item['id']]
-        if not vid_ids: return "0"
-        stats = youtube.videos().list(id=','.join(vid_ids), part='statistics').execute()
-        total_views = sum([int(item['statistics'].get('viewCount', 0)) for item in stats.get('items', [])])
-        return format_number(total_views / len(vid_ids) if vid_ids else 0)
-    except: return "N/A"
-
-def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Teratas)"):
+def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Teratas)", subs_filter="Semua", age_filter="Semua", vph_filter="Semua"):
     try:
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
-        fetch_limit = min(50, max_results * 2) 
+        
+        # Tarik data lebih banyak untuk antisipasi filter (max 50)
+        fetch_limit = min(50, max_results * 3) if subs_filter != "Semua" or age_filter != "Semua" else max_results
         res = youtube.search().list(q=query, type='channel', part='snippet', maxResults=fetch_limit).execute()
         ch_ids = [item['snippet']['channelId'] for item in res.get('items', [])]
         
         if not ch_ids: return []
         
-        stats_res = youtube.channels().list(id=','.join(ch_ids), part='snippet,statistics').execute()
+        # Ekstrak data lengkap + ID Playlist Uploads
+        stats_res = youtube.channels().list(id=','.join(ch_ids), part='snippet,statistics,contentDetails').execute()
         channels = []
         
         for item in stats_res.get('items', []):
-            subs_count = int(item['statistics'].get('subscriberCount', 0))
-            vid_count = int(item['statistics'].get('videoCount', 0))
-            total_views = int(item['statistics'].get('viewCount', 0))
+            raw_subs = int(item['statistics'].get('subscriberCount', 0))
+            raw_videos = int(item['statistics'].get('videoCount', 0))
+            raw_total_views = int(item['statistics'].get('viewCount', 0))
             published_at = item['snippet']['publishedAt']
             
+            # --- FILTER SUBSCRIBER ---
+            if subs_filter == "0-1K" and not (0 <= raw_subs <= 1000): continue
+            elif subs_filter == "1K-10K" and not (1000 < raw_subs <= 10000): continue
+            elif subs_filter == "10K-100K" and not (10000 < raw_subs <= 100000): continue
+            elif subs_filter == "100K-1M" and not (100000 < raw_subs <= 1000000): continue
+            elif subs_filter == "> 1M" and raw_subs <= 1000000: continue
+            
+            # --- FILTER & KALKULASI UMUR ---
+            pub_date = parse_yt_date(published_at)
+            now = datetime.utcnow()
+            diff = relativedelta(now, pub_date)
+            years_decimal = diff.years + (diff.months / 12.0)
+            
+            if age_filter == "Kurang dari 1 Tahun" and years_decimal >= 1: continue
+            elif age_filter == "1-3 Tahun" and not (1 <= years_decimal <= 3): continue
+            elif age_filter == "Lebih dari 3 Tahun" and years_decimal <= 3: continue
+            
+            # Penetapan Warna Border berdasarkan Umur
+            if years_decimal > 3:
+                card_color = "#ef4444" # Merah
+            elif years_decimal >= 1:
+                card_color = "#facc15" # Kuning
+            else:
+                card_color = "#10b981" # Hijau
+                
+            # Format Teks Umur
+            if years_decimal >= 1: age_str = f"{years_decimal:.1f} THN"
+            elif diff.months > 0: age_str = f"{diff.months} BLN"
+            else: age_str = f"{diff.days} HR"
+            
+            # --- FILTER VPH (Jika Aktif) ---
+            uploads_pl_id = item['contentDetails']['relatedPlaylists']['uploads']
+            avg_views_val, avg_vph_val = fetch_channel_recent_metrics(youtube, uploads_pl_id)
+            
+            if vph_filter == "> 100" and avg_vph_val <= 100: continue
+            elif vph_filter == "> 500" and avg_vph_val <= 500: continue
+            elif vph_filter == "> 1000" and avg_vph_val <= 1000: continue
+            elif vph_filter == "> 5000" and avg_vph_val <= 5000: continue
+
             channels.append({
                 'id': item['id'],
                 'title': item['snippet']['title'],
                 'custom_url': item['snippet'].get('customUrl', ''),
                 'thumb': item['snippet']['thumbnails'].get('medium', item['snippet']['thumbnails'].get('default', {}))['url'],
-                'subs': format_number(subs_count),
-                'raw_subs': subs_count,
-                'videos': format_number(vid_count),
-                'raw_videos': vid_count,
-                'total_views': format_number(total_views),
-                'raw_total_views': total_views,
-                'published_at_str': parse_yt_date(published_at).strftime("%d %b %Y"),
-                'age': calculate_channel_age(published_at),
-                'avg_views': fetch_channel_recent_avg_views(youtube, item['id']) 
+                'subs': format_number(raw_subs),
+                'raw_subs': raw_subs,
+                'videos': format_number(raw_videos),
+                'raw_videos': raw_videos,
+                'total_views': format_number(raw_total_views),
+                'raw_total_views': raw_total_views,
+                'published_at_str': pub_date.strftime("%d %b %Y"),
+                'pub_date_obj': pub_date,
+                'age': age_str,
+                'card_color': card_color,
+                'avg_views': format_number(avg_views_val),
+                'raw_avg_vph': avg_vph_val 
             })
                 
+        # --- SORTING UPDATE ---
         if sort_by == "Subscriber Terbanyak":
             channels = sorted(channels, key=lambda x: x['raw_subs'], reverse=True)
         elif sort_by == "Video Terbanyak":
             channels = sorted(channels, key=lambda x: x['raw_videos'], reverse=True)
-        else:
+        elif sort_by == "Channel Terbaru":
+            channels = sorted(channels, key=lambda x: x['pub_date_obj'], reverse=True)
+        elif sort_by == "Tumbuh Tercepat":
+            channels = sorted(channels, key=lambda x: x['raw_avg_vph'], reverse=True)
+        else: # Banyak Ditonton
             channels = sorted(channels, key=lambda x: x['raw_total_views'], reverse=True)
             
         return channels[:max_results]
     except Exception as e: 
-        st.error(f"❌ Terjadi kesalahan API YouTube. Detail: {str(e)}")
+        st.error(f"❌ Terjadi kesalahan saat menarik data dari YouTube. Detail: {str(e)}")
         return []
 
 def get_youtube_suggestions(query):
@@ -306,9 +364,12 @@ def extract_keywords(text):
 def analyze_channel_deep(channel_id):
     try:
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
-        ch_data = youtube.channels().list(id=channel_id, part='snippet,statistics').execute()['items'][0]
-        search_res = youtube.search().list(channelId=channel_id, part='snippet', type='video', order='date', maxResults=15).execute()
-        vid_ids = [item['id']['videoId'] for item in search_res.get('items', [])]
+        # AMBIL DATA DENGAN HEMAT KUOTA
+        ch_data = youtube.channels().list(id=channel_id, part='snippet,statistics,contentDetails').execute()['items'][0]
+        uploads_id = ch_data['contentDetails']['relatedPlaylists']['uploads']
+        
+        pl_res = youtube.playlistItems().list(playlistId=uploads_id, part='snippet', maxResults=15).execute()
+        vid_ids = [item['snippet']['resourceId']['videoId'] for item in pl_res.get('items', [])]
         
         recent_videos = []
         all_tags = []
@@ -332,7 +393,7 @@ def analyze_channel_deep(channel_id):
                         'title': snippet['title'], 
                         'views': format_number(views),
                         'raw_views': views,
-                        'date': snippet['publishedAt'][:10], 
+                        'date': parse_yt_date(snippet['publishedAt']).strftime("%d %b %Y"), 
                         'thumb': snippet['thumbnails'].get('medium', snippet['thumbnails'].get('default', {}))['url']
                     })
         
@@ -388,7 +449,7 @@ def process_video_response(items, youtube, region_code):
                 'title': snippet.get('title', 'Untitled'), 'thumbnail': best_thumb.get('url', ''),
                 'channel': snippet.get('channelTitle', 'Unknown'), 
                 'published_full': snippet.get('publishedAt', ''),
-                'published_simple': snippet.get('publishedAt', '')[:10],
+                'published_simple': parse_yt_date(snippet['publishedAt']).strftime("%d %b %Y"),
                 'duration': parse_duration(content.get('duration', 'PT0S')), 'description': desc,
                 'summary': smart_summarize(desc), 'keywords': extract_keywords(desc + " " + snippet.get('title', '')),
                 'views': views, 'views_fmt': format_number(views), 'likes': format_number(likes), 'comments': format_number(comments),
@@ -439,7 +500,7 @@ def get_trending_videos(region_code='ID', category_id=None, max_results=12):
         st.error(f"❌ Kuota API YouTube habis. Detail: {e}")
         return []
 
-# --- CALLBACK FUNCTIONS (AMAN) ---
+# --- CALLBACK FUNCTIONS ---
 def goto_analyzer(channel_id):
     st.session_state.stalk_channel = channel_id
     st.session_state.app_mode = "🕵️ Analisis Channel"
@@ -455,8 +516,8 @@ def remove_from_compare(channel_id):
     if channel_id in st.session_state.compare_list:
         st.session_state.compare_list.remove(channel_id)
 
-def execute_dir_search():
-    st.session_state.do_dir_search = True
+def trigger_dir_search():
+    st.session_state.run_dir_search = True
 
 # ==========================================
 # 5. UI FRONTEND & STATE MANAGEMENT
@@ -472,7 +533,7 @@ if 'best_time' not in st.session_state: st.session_state.best_time = None
 if 'rising_trends' not in st.session_state: st.session_state.rising_trends = None
 if 'channel_search_results' not in st.session_state: st.session_state.channel_search_results = []
 if 'compare_list' not in st.session_state: st.session_state.compare_list = []
-if 'do_dir_search' not in st.session_state: st.session_state.do_dir_search = False
+if 'run_dir_search' not in st.session_state: st.session_state.run_dir_search = False
 
 with st.sidebar:
     st.title("🎛️ Menu Navigasi")
@@ -665,58 +726,61 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                             try: st.download_button("⬇️ Thumb", requests.get(vid['thumbnail']).content, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
                             except: pass
 
-# --- MODE DIREKTORI CHANNEL (ADAPTIVE UI) ---
+# --- UPDATE V18.0: DIREKTORI DENGAN FONT BESAR & FILTER BARU ---
 elif mode == "🧭 Direktori Channel":
-    st.markdown("<h1 style='text-align: center;'>Temukan Niche Besar<br>Anda Selanjutnya</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #888; font-size:14px; margin-bottom:40px;'>Analisis top channel YouTube, temukan tren terbaru, dan dapatkan ide konten viral dengan bantuan AI.</p>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; margin-bottom: 5px;'>Temukan Niche Besar<br>Anda Selanjutnya</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: var(--text-color); opacity: 0.7; font-size:16px; margin-bottom:40px;'>Analisis top channel YouTube, temukan tren terbaru, dan dapatkan ide konten viral dengan bantuan AI.</p>", unsafe_allow_html=True)
     
     col1, col2, col3, col4 = st.columns([1, 4, 1, 1])
     with col2:
-        search_niche_query = st.text_input("Search", placeholder="🔍 cover musik", label_visibility="collapsed")
+        search_niche_query = st.text_input("Search", placeholder="🔍 Ketik niche (misal: cover musik)", label_visibility="collapsed")
     with col3:
         use_filter = st.checkbox("⚙️ Filter", value=False)
     with col4:
-        st.button("Cari Channel", type="primary", on_click=execute_dir_search, use_container_width=True)
+        st.button("Cari Channel", type="primary", on_click=trigger_dir_search, use_container_width=True)
 
+    # Inisialisasi variabel filter
     sort_channel = "Banyak Ditonton (Teratas)"
-    min_subs_filter = 0
+    subs_filter = "Semua"
+    vph_filter = "Semua"
+    age_filter = "Semua"
     
     if use_filter:
         with st.container(border=True):
-            st.markdown("##### ⚙️ Filter Pencarian")
+            st.markdown("##### ⚙️ Filter Pencarian & Sorting")
             f1, f2 = st.columns(2)
             with f1:
-                min_subs_filter = st.selectbox("Subscribers", options=[0, 10000, 100000, 1000000], format_func=lambda x: "Semua" if x==0 else f"> {int(x/1000)}K" if x < 1000000 else f"> {int(x/1000000)}M")
-                st.selectbox("Views / Jam (VPH) [Coming Soon]", ["Semua"])
+                subs_filter = st.selectbox("Subscribers", ["Semua", "0-1K", "1K-10K", "10K-100K", "100K-1M", "> 1M"])
+                vph_filter = st.selectbox("Views / Jam (VPH)", ["Semua", "> 100", "> 500", "> 1000", "> 5000"])
             with f2:
-                st.selectbox("Umur Channel [Coming Soon]", ["Semua"])
-                sort_channel = st.selectbox("Urutkan Berdasarkan", ["Banyak Ditonton (Teratas)", "Subscriber Terbanyak", "Video Terbanyak"])
+                age_filter = st.selectbox("Umur Channel", ["Semua", "Kurang dari 1 Tahun", "1-3 Tahun", "Lebih dari 3 Tahun"])
+                sort_channel = st.selectbox("Urutkan Berdasarkan", ["Banyak Ditonton (Teratas)", "Subscriber Terbanyak", "Video Terbanyak", "Channel Terbaru", "Tumbuh Tercepat"])
 
-    if st.session_state.do_dir_search:
+    if st.session_state.run_dir_search:
         if search_niche_query:
-            with st.spinner(f"Mencari channel teratas untuk '{search_niche_query}'..."):
-                st.session_state.dir_results = search_youtube_channels(search_niche_query, max_results=20, sort_by=sort_channel)
-        st.session_state.do_dir_search = False
+            with st.spinner(f"Mencari & menyaring channel untuk '{search_niche_query}'..."):
+                st.session_state.dir_results = search_youtube_channels(
+                    search_niche_query, max_results=20, sort_by=sort_channel, 
+                    subs_filter=subs_filter, age_filter=age_filter, vph_filter=vph_filter
+                )
+        st.session_state.run_dir_search = False
                 
     if st.session_state.dir_results:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown(f"""
 <div style='display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 1px solid rgba(128, 128, 128, 0.2); padding-bottom: 10px; margin-bottom: 20px;'>
-<h3 style='margin:0; font-size:20px;'>Analisis Channel Teratas</h3>
-<span style='font-size:12px; color:#888;'>{len(st.session_state.dir_results)} channel ditemukan</span>
+<h3 style='margin:0; font-size:24px;'>Analisis Channel Teratas</h3>
+<span style='font-size:14px; color:var(--text-color); opacity:0.7;'>{len(st.session_state.dir_results)} channel ditemukan</span>
 </div>
 """, unsafe_allow_html=True)
         
         cols = st.columns(4)
         for idx, ch in enumerate(st.session_state.dir_results):
             with cols[idx % 4]:
-                color = CARD_COLORS[idx % len(CARD_COLORS)]
-                age_text = ch['age']
-                age_color = "#10b981" if "BLN" in age_text or "HR" in age_text else "#ef4444"
                 safe_url = f"https://youtube.com/channel/{ch['id']}"
                 
                 st.markdown(f"""
-<div class="ch-card" style="border-top: 4px solid {color};">
+<div class="ch-card" style="border-top: 5px solid {ch['card_color']};">
 <div>
 <div class="ch-card-header">
 <div class="ch-header-left">
@@ -727,7 +791,7 @@ elif mode == "🧭 Direktori Channel":
 </div>
 </div>
 <div class="ch-header-icons">
-<a href="{safe_url}" target="_blank" title="Buka Channel">🔗</a>
+<a href="{safe_url}" target="_blank" title="Klik Kanan -> Copy Link">🔗</a>
 </div>
 </div>
 <div class="ch-metrics-grid">
@@ -751,7 +815,7 @@ elif mode == "🧭 Direktori Channel":
 </div>
 <div class="ch-footer">
 <span>📅 Dibuat: {ch['published_at_str']}</span>
-<span style="color: {age_color}; font-weight: 800; font-size: 11px;">{age_text}</span>
+<span style="color: {ch['card_color']}; font-weight: 800; font-size: 13px; opacity: 1;">{ch['age']}</span>
 </div>
 </div>
 """, unsafe_allow_html=True)
@@ -778,7 +842,7 @@ elif mode == "🕵️ Analisis Channel":
             with ch_cols[idx]:
                 safe_url = f"https://youtube.com/channel/{ch['id']}"
                 st.markdown(f"""
-<div class="ch-card" style="border-top: 4px solid #0ea5e9;">
+<div class="ch-card" style="border-top: 5px solid #0ea5e9;">
 <div class="ch-card-header">
 <div class="ch-header-left">
 <img src="{ch['thumb']}" class="ch-avatar">
@@ -788,7 +852,7 @@ elif mode == "🕵️ Analisis Channel":
 </div>
 </div>
 <div class="ch-header-icons">
-<a href="{safe_url}" target="_blank" title="Buka Channel">🔗</a>
+<a href="{safe_url}" target="_blank" title="Klik Kanan -> Copy Link">🔗</a>
 </div>
 </div>
 <div class="ch-metrics-grid">
@@ -818,7 +882,7 @@ elif mode == "🕵️ Analisis Channel":
 <div style="display:flex; align-items:center; gap:25px; margin-bottom:25px;">
 <img src="{ch_data['thumb']}" style="border-radius:50%; width:100px; border:4px solid #f43f5e;">
 <div>
-<h1 style="margin:0; color:#f43f5e; display:flex; align-items:center; gap:10px;">{ch_data['title']} <a href="{safe_url}" target="_blank" title="Buka Channel" style="text-decoration:none; font-size:26px; color:var(--text-color); opacity:0.4;">🔗</a></h1>
+<h1 style="margin:0; color:#f43f5e; display:flex; align-items:center; gap:10px;">{ch_data['title']} <a href="{safe_url}" target="_blank" title="Klik Kanan -> Copy Link" style="text-decoration:none; font-size:26px; color:var(--text-color); opacity:0.4;">🔗</a></h1>
 <p style="margin:0; opacity:0.8; font-size:18px;">{ch_data['custom_url']} • <b>{ch_data['subs']}</b> Subscribers • <b>{ch_data['video_count']}</b> Videos</p>
 </div>
 </div>
@@ -885,7 +949,7 @@ elif mode == "⚖️ Bandingkan Channel":
 <div style="display:flex; align-items:center; gap:15px; margin-bottom:15px;">
 <img src="{ch_data['thumb']}" style="border-radius:50%; width:70px; border:3px solid #8b5cf6;">
 <div>
-<h3 style="margin:0; color:#8b5cf6; font-size:18px; display:flex; align-items:center; gap:8px;">{ch_data['title']} <a href="{safe_comp_url}" target="_blank" title="Buka Channel" style="text-decoration:none; font-size:18px; color:var(--text-color); opacity:0.4;">🔗</a></h3>
+<h3 style="margin:0; color:#8b5cf6; font-size:18px; display:flex; align-items:center; gap:8px;">{ch_data['title']} <a href="{safe_comp_url}" target="_blank" title="Klik Kanan -> Copy Link" style="text-decoration:none; font-size:18px; color:var(--text-color); opacity:0.4;">🔗</a></h3>
 <p style="margin:0; opacity:0.8; font-size:12px;"><b>{ch_data['subs']}</b> Subs • <b>{ch_data['video_count']}</b> Vids</p>
 </div>
 </div>
