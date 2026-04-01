@@ -14,15 +14,17 @@ from dateutil.relativedelta import relativedelta
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V19.0 (Auto-Failover)", layout="wide", page_icon="🏢")
+st.set_page_config(page_title="Pro Niche Finder V19.1 (API Fix)", layout="wide", page_icon="🏢")
 
-# --- MULTI API KEY SETUP (AUTO-FAILOVER) ---
+# --- MULTI API KEY SETUP (SUPER PARSER FIX) ---
+raw_keys = ""
 if "YOUTUBE_API_KEYS" in st.secrets:
-    API_KEYS = [k.strip() for k in st.secrets["YOUTUBE_API_KEYS"].split(",") if k.strip()]
+    raw_keys = str(st.secrets["YOUTUBE_API_KEYS"])
 elif "YOUTUBE_API_KEY" in st.secrets:
-    API_KEYS = [st.secrets["YOUTUBE_API_KEY"]]
-else:
-    API_KEYS = []
+    raw_keys = str(st.secrets["YOUTUBE_API_KEY"])
+
+# Memaksa membelah string berdasarkan koma, walau nama variabelnya salah
+API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()]
 
 if not API_KEYS:
     st.error("API Key YouTube belum disetting di Secrets!")
@@ -92,6 +94,7 @@ st.markdown("""
     .stButton > button[kind="secondary"]:hover { background: rgba(14, 165, 233, 0.1); }
     .stalker-highlight { font-size: 16px; font-weight: bold; color: #f43f5e; margin-bottom: 5px; }
     
+    /* CSS DASHBOARD CHANNEL ADAPTIVE (FONT JUMBO) */
     .ch-card { 
         background-color: var(--secondary-background-color); 
         border-radius: 12px; 
@@ -206,13 +209,10 @@ def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Ter
                 elif diff.months > 0: age_str = f"{diff.months} BLN"
                 else: age_str = f"{diff.days} HR"
                 
-                # Hemat kuota saat filter VPH dimatikan
                 avg_views_val = "0"
                 avg_vph_val = 0
                 if vph_filter != "Semua" or sort_by == "Tumbuh Tercepat":
-                    # Gunakan fungsi yang sama
                     avg_views_val = fetch_channel_recent_avg_views(youtube, item['id'])
-                    # Simulasi VPH kasar untuk efisiensi
                     avg_vph_val = int(avg_views_val.replace('K','000').replace('M','000000').replace('.','')) / 24 if 'M' in avg_views_val or 'K' in avg_views_val else 0
                 
                     if vph_filter == "> 100" and avg_vph_val <= 100: continue
@@ -577,7 +577,6 @@ with st.sidebar:
     ], key="app_mode")
     st.markdown("---")
     
-    # INDIKATOR MULTI API
     st.caption(f"🔑 API Key Aktif: **Kunci ke-{st.session_state.current_api_index + 1}** (Dari {len(API_KEYS)})")
     
     if mode == "🔍 Pencarian Video":
