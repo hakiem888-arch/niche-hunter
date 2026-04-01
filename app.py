@@ -10,12 +10,11 @@ import json
 from collections import Counter
 from pytrends.request import TrendReq
 from dateutil.relativedelta import relativedelta
-import random
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Pro Niche Finder V15.0 (Dark Dashboard)", layout="wide", page_icon="🏢")
+st.set_page_config(page_title="Pro Niche Finder V16.0", layout="wide", page_icon="🏢")
 
 # --- API KEY SETUP ---
 try:
@@ -56,7 +55,6 @@ LICENSE_OPTIONS = {
     "Semua Lisensi": None, "Creative Commons": "creativeCommon", "Youtube Standar": "youtube"
 }
 
-# Warna border untuk card
 CARD_COLORS = ["#f43f5e", "#fbbf24", "#10b981", "#0ea5e9", "#8b5cf6"]
 
 # ==========================================
@@ -86,7 +84,7 @@ st.markdown("""
     .stButton > button[kind="secondary"]:hover { background: rgba(14, 165, 233, 0.1); }
     .stalker-highlight { font-size: 16px; font-weight: bold; color: #f43f5e; margin-bottom: 5px; }
     
-    /* CSS BARU UNTUK DASHBOARD CHANNEL CLONE */
+    /* CSS DASHBOARD CHANNEL (DARK) */
     .ch-card { background-color: #161618; border-radius: 12px; padding: 20px; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.3); margin-bottom: 10px; height: 100%; display: flex; flex-direction: column; justify-content: space-between;}
     .ch-card-header { display: flex; justify-content: space-between; margin-bottom: 20px; align-items: flex-start; }
     .ch-header-left { display: flex; gap: 12px; align-items: center; }
@@ -123,30 +121,21 @@ def calculate_channel_age(published_at):
         pub_date = datetime.strptime(published_at, "%Y-%m-%dT%H:%M:%SZ")
         now = datetime.utcnow()
         diff = relativedelta(now, pub_date)
-        
         years_decimal = diff.years + (diff.months / 12.0)
-        
-        if years_decimal >= 1:
-            return f"{years_decimal:.1f} THN"
-        elif diff.months > 0:
-            return f"{diff.months} BLN"
-        else:
-            return f"{diff.days} HR"
-    except:
-        return "N/A"
+        if years_decimal >= 1: return f"{years_decimal:.1f} THN"
+        elif diff.months > 0: return f"{diff.months} BLN"
+        else: return f"{diff.days} HR"
+    except: return "N/A"
 
 def fetch_channel_recent_avg_views(youtube, channel_id):
     try:
         res = youtube.search().list(channelId=channel_id, part='id', type='video', order='date', maxResults=5).execute()
         vid_ids = [item['id']['videoId'] for item in res.get('items', []) if 'videoId' in item['id']]
         if not vid_ids: return "0"
-        
         stats = youtube.videos().list(id=','.join(vid_ids), part='statistics').execute()
         total_views = sum([int(item['statistics'].get('viewCount', 0)) for item in stats.get('items', [])])
-        avg = total_views / len(vid_ids) if vid_ids else 0
-        return format_number(avg)
-    except:
-        return "N/A"
+        return format_number(total_views / len(vid_ids) if vid_ids else 0)
+    except: return "N/A"
 
 def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Teratas)"):
     try:
@@ -159,7 +148,6 @@ def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Ter
         
         stats_res = youtube.channels().list(id=','.join(ch_ids), part='snippet,statistics').execute()
         channels = []
-        
         for item in stats_res.get('items', []):
             subs_count = int(item['statistics'].get('subscriberCount', 0))
             vid_count = int(item['statistics'].get('videoCount', 0))
@@ -182,17 +170,16 @@ def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Ter
                 'avg_views': fetch_channel_recent_avg_views(youtube, item['id']) 
             })
                 
-        # Smart Sorting
         if sort_by == "Subscriber Terbanyak":
             channels = sorted(channels, key=lambda x: x['raw_subs'], reverse=True)
         elif sort_by == "Video Terbanyak":
             channels = sorted(channels, key=lambda x: x['raw_videos'], reverse=True)
-        else: # Banyak ditonton
+        else:
             channels = sorted(channels, key=lambda x: x['raw_total_views'], reverse=True)
             
         return channels[:max_results]
     except Exception as e: 
-        print(e)
+        st.error(f"❌ Terjadi kesalahan saat menarik data dari YouTube. Kemungkinan Kuota API harianmu sudah habis. Detail: {str(e)}")
         return []
 
 def get_youtube_suggestions(query):
@@ -349,7 +336,9 @@ def analyze_channel_deep(channel_id):
             'favorite_upload_hour': best_hour_str,
             'top_seo_tags': top_tags
         }
-    except: return None
+    except Exception as e:
+        st.error(f"❌ Gagal membedah channel. Kuota API YouTube mungkin habis. Detail: {str(e)}")
+        return None
 
 def process_video_response(items, youtube, region_code):
     channel_ids = list(set([item['snippet']['channelId'] for item in items]))
@@ -416,7 +405,7 @@ def search_youtube(query, region_code='ID', duration='any', category_id=None, pu
         elif sort_order == 'seo_custom': return sorted(results, key=lambda x: x['seo_score'], reverse=True)
         return results
     except Exception as e:
-        st.error(f"Error API: {e}")
+        st.error(f"❌ Terjadi kesalahan API YouTube. Kemungkinan limit kuota harian habis. Detail: {e}")
         return []
 
 def get_trending_videos(region_code='ID', category_id=None, max_results=12):
@@ -426,9 +415,11 @@ def get_trending_videos(region_code='ID', category_id=None, max_results=12):
         if category_id: params['videoCategoryId'] = category_id
         response = youtube.videos().list(**params).execute()
         return process_video_response(response.get('items', []), youtube, region_code)
-    except Exception as e: return []
+    except Exception as e: 
+        st.error(f"❌ Kuota API YouTube habis. Detail: {e}")
+        return []
 
-# --- CALLBACK FUNCTIONS ---
+# --- CALLBACK FUNCTIONS (AMAN) ---
 def goto_analyzer(channel_id):
     st.session_state.stalk_channel = channel_id
     st.session_state.app_mode = "🕵️ Analisis Channel"
@@ -444,9 +435,6 @@ def remove_from_compare(channel_id):
     if channel_id in st.session_state.compare_list:
         st.session_state.compare_list.remove(channel_id)
 
-def set_dir_search_state():
-    st.session_state.execute_dir_search = True
-
 # ==========================================
 # 5. UI FRONTEND & STATE MANAGEMENT
 # ==========================================
@@ -461,7 +449,6 @@ if 'best_time' not in st.session_state: st.session_state.best_time = None
 if 'rising_trends' not in st.session_state: st.session_state.rising_trends = None
 if 'channel_search_results' not in st.session_state: st.session_state.channel_search_results = []
 if 'compare_list' not in st.session_state: st.session_state.compare_list = []
-if 'execute_dir_search' not in st.session_state: st.session_state.execute_dir_search = False
 
 with st.sidebar:
     st.title("🎛️ Menu Navigasi")
@@ -654,117 +641,99 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                             try: st.download_button("⬇️ Thumb", requests.get(vid['thumbnail']).content, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
                             except: pass
 
-# --- UPDATE V15.0: MODE DIREKTORI DENGAN UI DASHBOARD ELEGAN (CLONE) ---
 elif mode == "🧭 Direktori Channel":
     st.markdown("<h1 style='text-align: center;'>Temukan Niche Besar<br>Anda Selanjutnya</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #888; font-size:14px; margin-bottom:40px;'>Analisis top channel YouTube, temukan tren terbaru, dan dapatkan ide konten viral dengan bantuan AI.</p>", unsafe_allow_html=True)
     
-    # UI Bar Pencarian di Tengah
-    col1, col2, col3, col4 = st.columns([1, 4, 1, 1])
-    with col2:
-        search_niche_query = st.text_input("Search", placeholder="🔍 cover musik", label_visibility="collapsed")
-    with col3:
-        use_filter = st.checkbox("⚙️ Filter", value=False)
-    with col4:
-        st.button("Cari Channel", on_click=set_dir_search_state, use_container_width=True)
+    with st.form("dir_search_form"):
+        col1, col2, col3, col4 = st.columns([1, 4, 1, 1])
+        with col2:
+            search_niche_query = st.text_input("Search", placeholder="🔍 cover musik", label_visibility="collapsed")
+        with col3:
+            use_filter = st.checkbox("⚙️ Filter", value=False)
+        with col4:
+            btn_cari_dir = st.form_submit_button("Cari Channel", use_container_width=True)
 
-    sort_channel = "Banyak Ditonton (Teratas)"
-    min_subs_filter = 0
-    
-    # Menu Filter Expandable
-    if use_filter:
-        with st.container(border=True):
+        sort_channel = "Banyak Ditonton (Teratas)"
+        
+        if use_filter:
             st.markdown("##### ⚙️ Filter Pencarian")
             f1, f2 = st.columns(2)
             with f1:
-                min_subs_filter = st.selectbox("Subscribers", options=[0, 10000, 100000, 1000000], format_func=lambda x: "Semua" if x==0 else f"> {int(x/1000)}K" if x < 1000000 else f"> {int(x/1000000)}M")
+                st.selectbox("Subscribers", ["Semua"])
                 st.selectbox("Views / Jam (VPH) [Coming Soon]", ["Semua"])
             with f2:
                 st.selectbox("Umur Channel [Coming Soon]", ["Semua"])
                 sort_channel = st.selectbox("Urutkan Berdasarkan", ["Banyak Ditonton (Teratas)", "Subscriber Terbanyak", "Video Terbanyak"])
 
-    # Logika Pencarian
-    if st.session_state.execute_dir_search:
-        if search_niche_query:
-            with st.spinner(f"Memfilter channel untuk niche '{search_niche_query}'..."):
-                st.session_state.dir_results = search_youtube_channels(
-                    search_niche_query, 
-                    max_results=20, 
-                    sort_by=sort_channel
-                )
-        st.session_state.execute_dir_search = False
+    if btn_cari_dir and search_niche_query:
+        with st.spinner(f"Mencari channel teratas untuk '{search_niche_query}'..."):
+            st.session_state.dir_results = search_youtube_channels(search_niche_query, max_results=20, sort_by=sort_channel)
                 
     if st.session_state.dir_results:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown(f"""
-        <div style='display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 20px;'>
-            <h3 style='margin:0; font-size:20px;'>Analisis Channel Teratas</h3>
-            <span style='font-size:12px; color:#888;'>{len(st.session_state.dir_results)} channel ditemukan</span>
-        </div>
-        """, unsafe_allow_html=True)
+<div style='display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 20px;'>
+<h3 style='margin:0; font-size:20px;'>Analisis Channel Teratas</h3>
+<span style='font-size:12px; color:#888;'>{len(st.session_state.dir_results)} channel ditemukan</span>
+</div>
+""", unsafe_allow_html=True)
         
-        # Grid Cards
         cols = st.columns(4)
         for idx, ch in enumerate(st.session_state.dir_results):
             with cols[idx % 4]:
                 color = CARD_COLORS[idx % len(CARD_COLORS)]
-                
                 age_text = ch['age']
                 age_color = "#10b981" if "BLN" in age_text or "HR" in age_text else "#ef4444"
-                
                 safe_url = f"https://youtube.com/channel/{ch['id']}"
                 
                 st.markdown(f"""
-                <div class="ch-card" style="border-top-color: {color};">
-                    <div>
-                        <div class="ch-card-header">
-                            <div class="ch-header-left">
-                                <img src="{ch['thumb']}" class="ch-avatar">
-                                <div class="ch-title-wrap">
-                                    <p class="ch-title" title="{ch['title']}">{ch['title']}</p>
-                                    <p class="ch-handle">{ch.get('custom_url', '')}</p>
-                                </div>
-                            </div>
-                            <div class="ch-header-icons">
-                                <a href="#" title="Simpan">♡</a>
-                                <a href="{safe_url}" target="_blank" title="Buka Channel">↗</a>
-                            </div>
-                        </div>
-                        
-                        <div class="ch-metrics-grid">
-                            <div class="ch-metric-item">
-                                <div class="ch-metric-label">SUBSCRIBER</div>
-                                <div class="ch-metric-value">{ch['subs']}</div>
-                            </div>
-                            <div class="ch-metric-item">
-                                <div class="ch-metric-label">TOTAL TAYANGAN</div>
-                                <div class="ch-metric-value">{ch['total_views']}</div>
-                            </div>
-                            <div class="ch-metric-item">
-                                <div class="ch-metric-label">TOTAL VIDEO</div>
-                                <div class="ch-metric-value">{ch['videos']}</div>
-                            </div>
-                            <div class="ch-metric-item">
-                                <div class="ch-metric-label">RERATA TAYANGAN</div>
-                                <div class="ch-metric-value">{ch['avg_views']}</div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="ch-footer">
-                        <span>📅 Dibuat: {ch['published_at_str']}</span>
-                        <span style="color: {age_color}; font-weight: 800; font-size: 10px;">{age_text}</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+<div class="ch-card" style="border-top-color: {color};">
+<div>
+<div class="ch-card-header">
+<div class="ch-header-left">
+<img src="{ch['thumb']}" class="ch-avatar">
+<div class="ch-title-wrap">
+<p class="ch-title" title="{ch['title']}">{ch['title']}</p>
+<p class="ch-handle">{ch.get('custom_url', '')}</p>
+</div>
+</div>
+<div class="ch-header-icons">
+<a href="#" title="Simpan">♡</a>
+<a href="{safe_url}" target="_blank" title="Buka Channel">↗</a>
+</div>
+</div>
+<div class="ch-metrics-grid">
+<div class="ch-metric-item">
+<div class="ch-metric-label">SUBSCRIBER</div>
+<div class="ch-metric-value">{ch['subs']}</div>
+</div>
+<div class="ch-metric-item">
+<div class="ch-metric-label">TOTAL TAYANGAN</div>
+<div class="ch-metric-value">{ch['total_views']}</div>
+</div>
+<div class="ch-metric-item">
+<div class="ch-metric-label">TOTAL VIDEO</div>
+<div class="ch-metric-value">{ch['videos']}</div>
+</div>
+<div class="ch-metric-item">
+<div class="ch-metric-label">RERATA TAYANGAN</div>
+<div class="ch-metric-value">{ch['avg_views']}</div>
+</div>
+</div>
+</div>
+<div class="ch-footer">
+<span>📅 Dibuat: {ch['published_at_str']}</span>
+<span style="color: {age_color}; font-weight: 800; font-size: 10px;">{age_text}</span>
+</div>
+</div>
+""", unsafe_allow_html=True)
                 
-                # Action Buttons (Tersembunyi di bawah card agar rapi)
                 c_b1, c_b2 = st.columns(2)
                 with c_b1: st.button("🕵️ Bedah", key=f"dir_stalk_{ch['id']}", on_click=goto_analyzer, args=(ch['id'],), use_container_width=True)
                 with c_b2: st.button("⚖️ Banding", key=f"dir_comp_{ch['id']}", on_click=add_to_compare_and_go, args=(ch['id'],), use_container_width=True)
                 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- MODE ANALISIS CHANNEL (SATUAN) ---
 elif mode == "🕵️ Analisis Channel":
     st.title("🕵️ Dasbor Intelijen Channel")
     
@@ -775,37 +744,36 @@ elif mode == "🕵️ Analisis Channel":
             
     if not st.session_state.stalk_channel and st.session_state.channel_search_results:
         st.write("### Pilihan Channel:")
-        
         ch_cols = st.columns(min(len(st.session_state.channel_search_results), 5))
         for idx, ch in enumerate(st.session_state.channel_search_results[:5]):
             with ch_cols[idx]:
                 safe_url = f"https://youtube.com/channel/{ch['id']}"
                 st.markdown(f"""
-                <div class="ch-card" style="border-top-color: #0ea5e9;">
-                    <div class="ch-card-header">
-                        <div class="ch-header-left">
-                            <img src="{ch['thumb']}" class="ch-avatar">
-                            <div class="ch-title-wrap">
-                                <p class="ch-title" title="{ch['title']}">{ch['title']}</p>
-                                <p class="ch-handle">{ch.get('custom_url', '')}</p>
-                            </div>
-                        </div>
-                        <div class="ch-header-icons">
-                            <a href="{safe_url}" target="_blank" title="Buka Channel">↗</a>
-                        </div>
-                    </div>
-                    <div class="ch-metrics-grid">
-                        <div class="ch-metric-item">
-                            <div class="ch-metric-label">SUBSCRIBER</div>
-                            <div class="ch-metric-value">{ch['subs']}</div>
-                        </div>
-                        <div class="ch-metric-item">
-                            <div class="ch-metric-label">TOTAL VIDEO</div>
-                            <div class="ch-metric-value">{ch['videos']}</div>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+<div class="ch-card" style="border-top-color: #0ea5e9;">
+<div class="ch-card-header">
+<div class="ch-header-left">
+<img src="{ch['thumb']}" class="ch-avatar">
+<div class="ch-title-wrap">
+<p class="ch-title" title="{ch['title']}">{ch['title']}</p>
+<p class="ch-handle">{ch.get('custom_url', '')}</p>
+</div>
+</div>
+<div class="ch-header-icons">
+<a href="{safe_url}" target="_blank" title="Buka Channel">↗</a>
+</div>
+</div>
+<div class="ch-metrics-grid">
+<div class="ch-metric-item">
+<div class="ch-metric-label">SUBSCRIBER</div>
+<div class="ch-metric-value">{ch['subs']}</div>
+</div>
+<div class="ch-metric-item">
+<div class="ch-metric-label">TOTAL VIDEO</div>
+<div class="ch-metric-value">{ch['videos']}</div>
+</div>
+</div>
+</div>
+""", unsafe_allow_html=True)
                 if st.button("Bedah Channel", key=f"btn_anl_{ch['id']}", use_container_width=True):
                     st.session_state.stalk_channel = ch['id']
                     st.rerun()
@@ -816,7 +784,6 @@ elif mode == "🕵️ Analisis Channel":
             
         if ch_data:
             safe_url = f"https://youtube.com/channel/{st.session_state.stalk_channel}"
-            
             st.markdown(f"""
 <div class="stalker-box" style="border: 2px solid #f43f5e; box-shadow: 0 0 20px rgba(244, 63, 94, 0.2);">
 <div style="display:flex; align-items:center; gap:25px; margin-bottom:25px;">
@@ -868,11 +835,7 @@ elif mode == "🕵️ Analisis Channel":
                     st.caption(f"📅 {vid['date']}")
                     st.markdown(f"**👁️ {vid['views']} Views**")
                     st.markdown(f"<span style='font-size:12px; opacity:0.8;'>{vid['title']}</span>", unsafe_allow_html=True)
-                    
-        else:
-            st.error("Gagal menarik data mendalam untuk channel ini. Mungkin ID tidak valid atau sedang dibatasi oleh YouTube.")
 
-# --- MODE BANDINGKAN CHANNEL ---
 elif mode == "⚖️ Bandingkan Channel":
     st.title("⚖️ Perbandingan Channel (Head-to-Head)")
     st.write("Analisis kekuatan kompetitor secara berdampingan untuk melihat siapa yang lebih unggul dalam SEO dan performa.")
@@ -926,5 +889,4 @@ elif mode == "⚖️ Bandingkan Channel":
                             st.info("Tidak menggunakan Tag.")
                             
                         st.markdown("</div></div>", unsafe_allow_html=True)
-                        
                         st.button("❌ Hapus dari Daftar", key=f"del_comp_{ch_id}", on_click=remove_from_compare, args=(ch_id,), use_container_width=True)
