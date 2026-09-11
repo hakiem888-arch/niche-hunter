@@ -349,8 +349,16 @@ def get_published_after_rfc3339(days):
 
 def get_channel_subs(youtube, channel_ids):
     try:
-        res = youtube.channels().list(id=','.join(channel_ids), part='statistics').execute()
-        return {item['id']: int(item['statistics'].get('subscriberCount', 0)) for item in res.get('items', [])}
+        result = {}
+        # YouTube channel ID filters are safest in batches of 50.
+        for start in range(0, len(channel_ids), 50):
+            batch = channel_ids[start:start + 50]
+            res = youtube.channels().list(id=','.join(batch), part='statistics').execute()
+            result.update({
+                item['id']: int(item['statistics'].get('subscriberCount', 0))
+                for item in res.get('items', [])
+            })
+        return result
     except Exception as e:
         if "quota" in str(e).lower() or "403" in str(e): raise e
         return {}
