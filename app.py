@@ -500,6 +500,210 @@ def fetch_channel_baselines(youtube, channel_ids, max_videos=8, max_channels=20)
             continue
     return baselines
 
+
+
+# ==========================================
+# LEGACY / SHARED YOUTUBE FUNCTIONS
+# ==========================================
+
+def get_channel_subs(youtube, channel_ids):
+    try:
+        result = {}
+        # YouTube channel ID filters are safest in batches of 50.
+        for start in range(0, len(channel_ids), 50):
+            batch = channel_ids[start:start + 50]
+            res = youtube.channels().list(id=','.join(batch), part='statistics').execute()
+            result.update({
+                item['id']: int(item['statistics'].get('subscriberCount', 0))
+                for item in res.get('items', [])
+            })
+        return result
+    except Exception as e:
+        if "quota" in str(e).lower() or "403" in str(e): raise e
+        return {}
+
+def smart_summarize(text):
+    if not text: return ["Tidak ada deskripsi."]
+    lines = [l.strip() for l in re.sub(r'http\S+', '', text).split('\n') if len(l.strip()) > 5]
+    spam = ['subscribe', 'follow', 'instagram', 'tiktok', 'donasi', 'saweria', 'copyright']
+    important = [l for l in lines if len(l) > 15 and not any(s in l.lower() for s in spam)]
+    return important[:4] if important else (lines[:3] if lines else ["Deskripsi terlalu pendek."])
+
+def extract_keywords(text):
+    words = [w for w in re.findall(r'\w+', text.lower()) if len(w) > 3 and w not in ['yang', 'dan', 'di', 'ke', 'dari', 'ini', 'itu', 'untuk', 'dengan', 'adalah', 'video', 'saya', 'aku', 'the', 'and', 'to', 'of', 'in', 'is', 'for', 'with']]
+    return [item[0] for item in Counter(words).most_common(5)]
+
+def analyze_channel_deep(channel_id):
+    for attempt in range(len(API_KEYS)):
+        key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
+        youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
+        try:
+            ch_data = youtube.channels().list(id=channel_id, part='snippet,statistics,contentDetails').execute()['items'][0]
+            uploads_id = ch_data['contentDetails']['relatedPlaylists']['uploads']
+            
+            pl_res = youtube.playlistItems().list(playlistId=uploads_id, part='snippet', maxResults=15).execute()
+            vid_ids = [item['snippet']['resourceId']['videoId'] for item in pl_res.get('items', [])]
+            
+            recent_videos = []
+            all_tags = []
+            upload_hours = []
+            
+            if vid_ids:
+                stats = youtube.videos().list(id=','.join(vid_ids), part='snippet,statistics').execute()
+                for i, item in enumerate(stats['items']):
+                    snippet = item['snippet']
+                    views = int(item['statistics'].get('viewCount', 0))
+                    try:
+                        pub_dt = parse_yt_date(snippet['publishedAt']) + timedelta(hours=7)
+                        upload_hours.append(pub_dt.hour)
+                    except: pass
+                    
+                    vid_tags = snippet.get('tags', [])
+                    all_tags.extend(vid_tags)
+                    
+                    if i < 5:
+                        recent_videos.append({
+                            'title': snippet['title'], 
+                            'views': format_number(views),
+                            'raw_views': views,
+                            'date': parse_yt_date(snippet['publishedAt']).strftime("%d %b %Y"), 
+                            'thumb': snippet['thumbnails'].get('medium', snippet['thumbnails'].get('default', {}))['url']
+                        })
+            
+            best_hour_str = "Tidak diketahui"
+            if upload_hours:
+                most_common_hour = Counter(upload_hours).most_common(1)[0][0]
+                best_hour_str = f"Pukul {most_common_hour:02d}:00 WIB"
+                
+            top_tags = Counter(all_tags).most_common(15)
+            avg_views_calc = sum([v['raw_views'] for v in recent_videos]) / len(recent_videos) if recent_videos else 0
+
+            st.session_state.current_api_index = key_idx
+            return {
+                'title': ch_data['snippet']['title'], 
+                'thumb': ch_data['snippet']['thumbnails']['medium']['url'],
+                'custom_url': ch_data['snippet'].get('customUrl', ''), 
+                'subs': format_number(int(ch_data['statistics'].get('subscriberCount', 0))),
+                'total_views': format_number(int(ch_data['statistics'].get('viewCount', 0))), 
+                'video_count': format_number(int(ch_data['statistics'].get('videoCount', 0))),
+                'avg_recent_views': format_number(avg_views_calc),
+                'recent_videos': recent_videos,
+                'favorite_upload_hour': best_hour_str,
+                'top_seo_tags': top_tags
+            }
+        except Exception as e:
+            if "quota" in str(e).lower() or "403" in str(e):
+                continue
+            else:
+                st.error(f"❌ Gagal membedah channel. Detail: {str(e)}")
+                return None
+    st.error("❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!")
+    return None
+
+def process_video_response(items, youtube, region_code):
+    channel_ids = list(set([item['snippet']['channelId'] for item in items]))
+    subs_map = get_channel_subs(youtube, channel_ids)
+    results = []
+    
+    for i, item in enumerate(items):
+        try:
+            stats = item.get('statistics', {})
+            snippet = item.get('snippet', {})
+            content = item.get('contentDetails', {})
+            views = int(stats.get('viewCount', 0))
+            likes = int(stats.get('likeCount', 0))
+            comments = int(stats.get('commentCount', 0))
+            subs = subs_map.get(snippet.get('channelId', ''), 0)
+            
+            thumbnails = snippet.get('thumbnails', {})
+            best_thumb = thumbnails.get('maxres') or thumbnails.get('high') or thumbnails.get('medium') or thumbnails.get('default') or {}
+            
+            desc = snippet.get('description', '')
+            tags = snippet.get('tags', [])[:10]
+            seo_score, seo_checks = calculate_seo_score(snippet.get('title', ''), desc, tags)
+            video_id = item['id'] if isinstance(item['id'], str) else item['id'].get('videoId', '')
+
+            results.append({
+                'rank': i + 1, 'id': video_id, 'channel_id': snippet.get('channelId', ''),
+                'title': snippet.get('title', 'Untitled'), 'thumbnail': best_thumb.get('url', ''),
+                'channel': snippet.get('channelTitle', 'Unknown'), 
+                'published_full': snippet.get('publishedAt', ''),
+                'published_simple': parse_yt_date(snippet['publishedAt']).strftime("%d %b %Y"),
+                'duration': parse_duration(content.get('duration', 'PT0S')), 'duration_iso': content.get('duration','PT0S'), 'duration_seconds': parse_iso_duration_seconds(content.get('duration','PT0S')), 'description': desc,
+                'summary': smart_summarize(desc), 'keywords': extract_keywords(desc + " " + snippet.get('title', '')),
+                'views': views, 'raw_views': views, 'views_fmt': format_number(views), 'likes': format_number(likes), 'raw_likes': likes, 'comments': format_number(comments), 'raw_comments': comments, 'raw_subs': subs,
+                'vph': calculate_vph(snippet.get('publishedAt', ''), views), 'vph_fmt': f"{calculate_vph(snippet.get('publishedAt', ''), views):,.0f}", 
+                'earnings': estimate_earnings(views, region_code), 'er': calculate_er(views, likes, comments), 
+                'subs': format_number(subs), 'ratio': (views/subs if subs > 0 else 0), 'ratio_label': f"{(views/subs if subs>0 else 0):.1f}x", 
+                'is_gem': (views/subs if subs > 0 else 0) > 1.5, 'tags': tags, 'seo_score': seo_score, 'seo_checks': seo_checks,
+                'link': f"https://youtu.be/{video_id}"
+            })
+        except: continue 
+    return results
+
+def search_youtube(query, region_code='ID', duration='any', category_id=None, published_after=None, license_type=None, sort_order='relevance', max_results=12):
+    for attempt in range(len(API_KEYS)):
+        key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
+        youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
+        try:
+            api_order = 'viewCount' if sort_order in ['vph_custom', 'ratio_custom', 'seo_custom'] else sort_order
+            params = {'q': query, 'part': 'snippet', 'type': 'video', 'maxResults': max_results, 'order': api_order}
+            
+            if region_code: params['regionCode'] = region_code
+            if duration != 'any': params['videoDuration'] = duration
+            if category_id: params['videoCategoryId'] = category_id
+            if published_after: params['publishedAfter'] = published_after
+            if license_type: params['videoLicense'] = license_type
+            
+            search_res = youtube.search().list(**params).execute()
+            vid_ids = [item['id']['videoId'] for item in search_res.get('items', []) if 'videoId' in item['id']]
+            if not vid_ids: return []
+
+            stats_res = youtube.videos().list(part='snippet,statistics,contentDetails', id=','.join(vid_ids)).execute()
+            results = process_video_response(stats_res.get('items', []), youtube, region_code)
+            
+            if sort_order == 'vph_custom': return sorted(results, key=lambda x: x['vph'], reverse=True)
+            elif sort_order == 'ratio_custom': return sorted(results, key=lambda x: x['ratio'], reverse=True)
+            elif sort_order == 'seo_custom': return sorted(results, key=lambda x: x['seo_score'], reverse=True)
+            
+            st.session_state.current_api_index = key_idx
+            return results
+        except Exception as e:
+            if "quota" in str(e).lower() or "403" in str(e):
+                continue
+            else:
+                st.error(f"❌ Terjadi kesalahan API YouTube. Detail: {e}")
+                return []
+    st.error("❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!")
+    return []
+
+def get_trending_videos(region_code='ID', category_id=None, max_results=12):
+    for attempt in range(len(API_KEYS)):
+        key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
+        youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
+        try:
+            params = {'part': 'snippet,statistics,contentDetails', 'chart': 'mostPopular', 'regionCode': region_code, 'maxResults': max_results}
+            if category_id: params['videoCategoryId'] = category_id
+            response = youtube.videos().list(**params).execute()
+            
+            st.session_state.current_api_index = key_idx
+            return process_video_response(response.get('items', []), youtube, region_code)
+        except Exception as e:
+            if "quota" in str(e).lower() or "403" in str(e):
+                continue
+            else:
+                st.error(f"❌ Error API: {e}")
+                return []
+    st.error("❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!")
+    return []
+
+
+def get_published_after_rfc3339(days):
+    """Return an RFC3339 UTC timestamp for a freshness window."""
+    if not days:
+        return None
+    return (datetime.utcnow() - timedelta(days=int(days))).isoformat(timespec="seconds") + "Z"
+
 def search_viral_longform(query, region_code='ID', category_id=None, max_results=30,
                           freshness_days=7, min_duration_seconds=240):
     """V2 discovery: fresh + high-performing long-form candidates.
