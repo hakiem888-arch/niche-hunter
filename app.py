@@ -456,17 +456,26 @@ def search_viral_videos(query, region_code='ID', category_id=None, max_results=3
         youtube=build('youtube','v3',developerKey=API_KEYS[key_idx])
         try:
             ids=[]
-            # Batasi waktu upload ke 7 hari terakhir
-            published_after = (datetime.utcnow() - timedelta(days=7)).isoformat("T") + "Z"
+            # 1. Format waktu yang dijamin aman oleh YouTube API (tanpa microsecond)
+            published_after = (datetime.utcnow() - timedelta(days=7)).replace(microsecond=0).isoformat() + "Z"
             
-            # Menggunakan viewCount dengan batas waktu 7 hari terakhir, dan tanpa filter 'short'
-            params={'q': query, 'part':'snippet', 'type':'video', 'maxResults':min(50,max_results), 'order':'viewCount', 'publishedAfter': published_after}
-            
-            if region_code: params['regionCode']=region_code
-            if category_id: params['videoCategoryId']=category_id
-            
-            res=youtube.search().list(**params).execute()
-            ids += [x['id']['videoId'] for x in res.get('items',[]) if x.get('id',{}).get('videoId')]
+            # 2. Paksa API YouTube hanya mencari video Medium (4-20 menit) dan Long (>20 menit)
+            for dur in ['medium', 'long']:
+                params = {
+                    'q': query + ' -shorts',  # Menolak video yang memakai hashtag shorts
+                    'part': 'snippet', 
+                    'type': 'video', 
+                    'maxResults': min(25, max_results), # Ambil 25 medium, 25 long (total max 50)
+                    'order': 'viewCount', 
+                    'publishedAfter': published_after,
+                    'videoDuration': dur
+                }
+                
+                if region_code: params['regionCode']=region_code
+                if category_id: params['videoCategoryId']=category_id
+                
+                res=youtube.search().list(**params).execute()
+                ids += [x['id']['videoId'] for x in res.get('items',[]) if x.get('id',{}).get('videoId')]
             
             ids=list(dict.fromkeys(ids))[:50]
             if not ids: return []
@@ -476,7 +485,7 @@ def search_viral_videos(query, region_code='ID', category_id=None, max_results=3
             
             candidates=[]
             for v in raw:
-                # Pastikan durasi di atas 3 menit (180 detik) dan bukan format vertikal/Shorts
+                # 3. Filter akhir untuk memastikan durasi > 3 menit
                 if v.get('duration_seconds',0) > 180 and v.get('shorts_confidence', 100) < 40:
                     candidates.append(v)
                     
