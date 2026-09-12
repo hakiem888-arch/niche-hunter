@@ -1,6 +1,5 @@
 import streamlit as st
 from googleapiclient.discovery import build
-import google.generativeai as genai
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import requests
