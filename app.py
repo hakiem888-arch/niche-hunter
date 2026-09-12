@@ -9,6 +9,8 @@ import urllib.parse
 import json
 import sqlite3
 import math
+import statistics
+import matplotlib.pyplot as plt
 from collections import Counter
 from pytrends.request import TrendReq
 from dateutil.relativedelta import relativedelta
@@ -347,9 +349,11 @@ def calculate_seo_score(title, desc, tags):
     return score, checks
 
 # ==========================================
-# VIRAL INTELLIGENCE ENGINE
+# VIRAL INTELLIGENCE V2
+# New long-form videos + breakout prediction
 # ==========================================
 SNAPSHOT_DB = "niche_hunter_snapshots.db"
+
 
 def init_snapshot_db():
     conn = sqlite3.connect(SNAPSHOT_DB)
@@ -365,13 +369,16 @@ def init_snapshot_db():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_video_snapshots ON video_snapshots(video_id, captured_at)")
     conn.commit(); conn.close()
 
+
 init_snapshot_db()
+
 
 def parse_iso_duration_seconds(iso):
     m = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', iso or '')
     if not m: return 0
     h, mi, sec = [int(x or 0) for x in m.groups()]
-    return h*3600 + mi*60 + sec
+    return h * 3600 + mi * 60 + sec
+
 
 def shorts_confidence(video):
     title = (video.get('title') or '').lower()
@@ -385,352 +392,398 @@ def shorts_confidence(video):
     if 'shorts' in desc: score += 10
     return min(score, 100)
 
+
 def save_video_snapshots(results):
     if not results: return
     now = datetime.utcnow().isoformat()
     conn = sqlite3.connect(SNAPSHOT_DB)
     for v in results:
-        conn.execute("INSERT INTO video_snapshots(video_id,captured_at,views,likes,comments,subscribers) VALUES(?,?,?,?,?,?)",
-                     (v['id'], now, int(v.get('raw_views',v.get('views',0))), int(v.get('raw_likes',0)), int(v.get('raw_comments',0)), int(v.get('raw_subs',0))))
+        conn.execute(
+            "INSERT INTO video_snapshots(video_id,captured_at,views,likes,comments,subscribers) VALUES(?,?,?,?,?,?)",
+            (v['id'], now, int(v.get('raw_views', v.get('views', 0))), int(v.get('raw_likes', 0)),
+             int(v.get('raw_comments', 0)), int(v.get('raw_subs', 0)))
+        )
     conn.commit(); conn.close()
 
-def get_previous_snapshot(video_id):
-    conn = sqlite3.connect(SNAPSHOT_DB)
-    row = conn.execute("SELECT captured_at,views,likes,comments,subscribers FROM video_snapshots WHERE video_id=? ORDER BY captured_at DESC LIMIT 1", (video_id,)).fetchall()
-    conn.close()
-    return row[0] if row else None
 
-def calculate_acceleration(video):
-    prev = get_previous_snapshot(video['id'])
-    if not prev: return 1.0, 0
-    prev_time = datetime.fromisoformat(prev[0]); now = datetime.utcnow()
-    hours = max((now-prev_time).total_seconds()/3600, 0.05)
-    prev_vph = max((int(video.get('raw_views',video.get('views',0))) - int(prev[1])) / hours, 0)
-    current_vph = float(video.get('vph',0))
-    if prev_vph <= 0: return 1.0, 0
-    return max(current_vph/prev_vph, 0), int(prev_vph)
+def get_snapshot_history(video_id, limit=6):
+    conn = sqlite3.connect(SNAPSHOT_DB)
+    rows = conn.execute(
+        "SELECT captured_at,views,likes,comments,subscribers FROM video_snapshots "
+        "WHERE video_id=? ORDER BY captured_at DESC LIMIT ?", (video_id, limit)
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def calculate_v2_velocity_and_acceleration(video):
+    """Return interval VPH, acceleration and history confidence.
+    First scan falls back to lifetime VPH. Later scans use real snapshot deltas.
+    """
+    rows = get_snapshot_history(video['id'], 6)
+    now = datetime.utcnow()
+    current_views = int(video.get('raw_views', video.get('views', 0)))
+
+    if not rows:
+        return float(video.get('vph', 0)), 1.0, 0, 0
+
+    latest_time = datetime.fromisoformat(rows[0][0])
+    elapsed = max((now - latest_time).total_seconds() / 3600, 0.05)
+    current_interval_vph = max((current_views - int(rows[0][1])) / elapsed, 0)
+
+    # With only one historical snapshot, we can measure velocity but not true acceleration.
+    if len(rows) < 2:
+        return current_interval_vph, 1.0, int(video.get('vph', 0)), 1
+
+    prev_time = datetime.fromisoformat(rows[1][0])
+    interval_hours = max((latest_time - prev_time).total_seconds() / 3600, 0.05)
+    previous_interval_vph = max((int(rows[0][1]) - int(rows[1][1])) / interval_hours, 0)
+    if previous_interval_vph <= 0:
+        acceleration = 3.0 if current_interval_vph > 0 else 1.0
+    else:
+        acceleration = current_interval_vph / previous_interval_vph
+    return current_interval_vph, max(0.1, acceleration), int(previous_interval_vph), len(rows)
+
 
 def normalize_score(value, low, high):
     if high <= low: return 50
-    return max(0, min(100, (value-low)/(high-low)*100))
+    return max(0, min(100, (value - low) / (high - low) * 100))
 
-def calculate_viral_score(v):
-    vph_score = normalize_score(math.log10(max(v.get('vph',0),1)), 1, 5)
-    ratio_score = normalize_score(math.log10(max(v.get('ratio',0.01),0.01)), -1, 2)
-    freshness = max(0, min(100, 100 - (v.get('age_hours',999)/168)*100))
-    er_score = normalize_score(v.get('er',0), 0, 10)
-    short_score = v.get('shorts_confidence',0)
-    accel_score = normalize_score(math.log10(max(v.get('acceleration',1),0.1)), -1, 1)
-    relevance = v.get('query_relevance',70)
-    return round(0.28*vph_score + 0.22*ratio_score + 0.10*freshness + 0.10*er_score + 0.10*short_score + 0.15*accel_score + 0.05*relevance, 1)
 
-def viral_label(score):
-    if score >= 85: return '💥 EXPLOSIVE'
-    if score >= 72: return '🔥 VIRAL'
-    if score >= 58: return '🚀 HOT'
-    if score >= 42: return '📈 GROWING'
+def median_safe(values, default=0):
+    vals = [float(x) for x in values if x is not None and float(x) >= 0]
+    return statistics.median(vals) if vals else default
+
+
+def fetch_channel_baselines(youtube, channel_ids, max_videos=8, max_channels=20):
+    """Build a channel-normal baseline from recent uploads.
+    Capped to the strongest discovered channels to protect YouTube API quota.
+    Results are cached in Streamlit session for the current run/session.
+    """
+    cache = st.session_state.setdefault('viral_baseline_cache', {})
+    baselines = {}
+    unique_ids = list(dict.fromkeys([x for x in channel_ids if x]))[:max_channels]
+    for channel_id in unique_ids:
+        cached = cache.get(channel_id)
+        if cached and (datetime.utcnow() - cached['captured_at']).total_seconds() < 1800:
+            baselines[channel_id] = cached['data']
+            continue
+        try:
+            search_res = youtube.search().list(
+                channelId=channel_id, part='id,snippet', type='video', order='date',
+                maxResults=min(10, max_videos)
+            ).execute()
+            ids = [x['id']['videoId'] for x in search_res.get('items', []) if x.get('id', {}).get('videoId')]
+            if not ids:
+                continue
+            stats_res = youtube.videos().list(id=','.join(ids), part='snippet,statistics').execute()
+            views_list, vph_list = [], []
+            for item in stats_res.get('items', []):
+                stt = item.get('statistics', {})
+                sn = item.get('snippet', {})
+                views = int(stt.get('viewCount', 0))
+                published = sn.get('publishedAt', '')
+                if not published:
+                    continue
+                age_hours = max((datetime.utcnow() - parse_yt_date(published)).total_seconds() / 3600, 1)
+                views_list.append(views); vph_list.append(views / age_hours)
+            if views_list:
+                data = {
+                    'sample_size': len(views_list),
+                    'median_views': median_safe(views_list),
+                    'median_vph': median_safe(vph_list),
+                    'avg_views': sum(views_list) / len(views_list),
+                }
+                cache[channel_id] = {'captured_at': datetime.utcnow(), 'data': data}
+                baselines[channel_id] = data
+        except Exception as e:
+            if 'quota' in str(e).lower() or '403' in str(e): raise
+            continue
+    return baselines
+
+def search_viral_longform(query, region_code='ID', category_id=None, max_results=30,
+                          freshness_days=7, min_duration_seconds=240):
+    """V2 discovery: fresh + high-performing long-form candidates.
+    YouTube API duration buckets are split into medium (4-20m) and long (>20m).
+    """
+    for attempt in range(len(API_KEYS)):
+        key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
+        youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
+        try:
+            published_after = get_published_after_rfc3339(freshness_days)
+            collected = []
+            discovery_source = {}
+            # Fresh discovery catches new uploads that have not accumulated huge lifetime views.
+            # Breakout discovery catches videos already gaining unusual view volume.
+            for duration_bucket in ['medium', 'long']:
+                for order in ['date', 'viewCount']:
+                    params = {
+                        'q': query, 'part': 'snippet', 'type': 'video',
+                        'maxResults': min(50, max(10, max_results)),
+                        'order': order, 'videoDuration': duration_bucket,
+                    }
+                    if region_code: params['regionCode'] = region_code
+                    if category_id: params['videoCategoryId'] = category_id
+                    if published_after: params['publishedAfter'] = published_after
+                    res = youtube.search().list(**params).execute()
+                    for x in res.get('items', []):
+                        vid = x.get('id', {}).get('videoId')
+                        if vid:
+                            collected.append(vid)
+                            source_name = 'Fresh Uploads' if order == 'date' else 'Recent High-Views'
+                            discovery_source[vid] = source_name
+
+            ids = list(dict.fromkeys(collected))[:50]
+            if not ids:
+                return []
+
+            stats = youtube.videos().list(
+                id=','.join(ids), part='snippet,statistics,contentDetails'
+            ).execute()
+            raw = process_video_response(stats.get('items', []), youtube, region_code)
+
+            # Hard long-form gate. 4 minutes is the default; no Shorts leakage.
+            candidates = []
+            cutoff_hours = freshness_days * 24
+            for v in raw:
+                age_hours = max((datetime.utcnow() - parse_yt_date(v.get('published_full', ''))).total_seconds() / 3600, 0)
+                duration = int(v.get('duration_seconds', 0))
+                if duration < min_duration_seconds:
+                    continue
+                if age_hours > cutoff_hours + 1:
+                    continue
+                if v.get('shorts_confidence', 0) >= 45:
+                    continue
+                candidates.append(v)
+
+            # Channel baseline requires extra calls, so do it only for discovered channels.
+            baseline_candidates = sorted(candidates, key=lambda x: x.get('vph', 0), reverse=True)[:20]
+            channel_ids = [v.get('channel_id') for v in baseline_candidates if v.get('channel_id')]
+            baselines = fetch_channel_baselines(youtube, channel_ids, max_videos=8, max_channels=20)
+            for v in candidates:
+                v['discovery_source'] = discovery_source.get(v.get('id'), 'Recent Candidate')
+            enrich_viral_longform(candidates, query, baselines)
+            save_video_snapshots(candidates)
+            st.session_state.current_api_index = key_idx
+            return sorted(candidates, key=lambda x: x.get('breakout_score', 0), reverse=True)[:max_results]
+        except Exception as e:
+            if 'quota' in str(e).lower() or '403' in str(e):
+                continue
+            st.error(f'❌ Viral Intelligence V2 API error: {e}')
+            return []
+    st.error('❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!')
+    return []
+
+
+def calculate_breakout_score(v):
+    velocity_score = normalize_score(math.log10(max(v.get('velocity_vph', 0), 1)), 1, 5)
+    acceleration_score = normalize_score(math.log10(max(v.get('acceleration', 1), 0.1)), -1, 1)
+    baseline_multiple = v.get('channel_breakout_multiple', 0)
+    baseline_score = normalize_score(math.log10(max(baseline_multiple, 0.1)), -1, 1.5)
+    ratio_score = normalize_score(math.log10(max(v.get('ratio', 0.01), 0.01)), -1, 2)
+    er_score = normalize_score(v.get('er', 0), 0, 10)
+    freshness_score = max(0, min(100, 100 - (v.get('age_hours', 999) / 168) * 100))
+    relevance_score = v.get('query_relevance', 70)
+
+    score = (
+        0.30 * velocity_score +
+        0.20 * acceleration_score +
+        0.15 * baseline_score +
+        0.10 * ratio_score +
+        0.10 * er_score +
+        0.10 * freshness_score +
+        0.05 * relevance_score
+    )
+    return round(max(0, min(100, score)), 1)
+
+
+def breakout_label(score):
+    if score >= 90: return '💥 EXPLOSIVE'
+    if score >= 80: return '🚨 BREAKOUT'
+    if score >= 70: return '🔥 HOT'
+    if score >= 55: return '🚀 RISING'
+    if score >= 40: return '📈 EARLY'
     return 'NORMAL'
 
-def enrich_viral_metrics(results, query=''):
+
+def enrich_viral_longform(results, query='', baselines=None):
+    baselines = baselines or {}
     now = datetime.utcnow()
     q_words = set(re.findall(r'\w+', query.lower()))
     for v in results:
-        pub = parse_yt_date(v.get('published_full',''))
-        age_hours = max((now-pub).total_seconds()/3600, 0.05)
+        pub = parse_yt_date(v.get('published_full', ''))
+        age_hours = max((now - pub).total_seconds() / 3600, 0.05)
         v['age_hours'] = age_hours
-        v['duration_seconds'] = v.get('duration_seconds', parse_iso_duration_seconds(v.get('duration_iso','')))
+        v['duration_seconds'] = v.get('duration_seconds', parse_iso_duration_seconds(v.get('duration_iso', '')))
         v['shorts_confidence'] = shorts_confidence(v)
-        accel, prev_vph = calculate_acceleration(v)
-        v['acceleration'] = round(accel, 2)
-        v['previous_vph'] = prev_vph
-        title_words = set(re.findall(r'\w+', (v.get('title','')+' '+v.get('description','')).lower()))
-        v['query_relevance'] = min(100, 40 + 20*len(q_words & title_words)) if q_words else 70
-        v['viral_score'] = calculate_viral_score(v)
-        v['viral_label'] = viral_label(v['viral_score'])
-        v['breakout'] = v['viral_score'] >= 65 and (v['acceleration'] >= 1.5 or v['ratio'] >= 5)
-    return sorted(results, key=lambda x:x['viral_score'], reverse=True)
 
-def search_viral_videos(query, region_code='ID', category_id=None, max_results=30):
-    for attempt in range(len(API_KEYS)):
-        key_idx=(st.session_state.current_api_index+attempt)%len(API_KEYS)
-        youtube=build('youtube','v3',developerKey=API_KEYS[key_idx])
-        try:
-            ids=[]
-            # 1. Format waktu yang dijamin aman oleh YouTube API (tanpa microsecond)
-            published_after = (datetime.utcnow() - timedelta(days=7)).replace(microsecond=0).isoformat() + "Z"
-            
-            # 2. Paksa API YouTube hanya mencari video Medium (4-20 menit) dan Long (>20 menit)
-            for dur in ['medium', 'long']:
-                params = {
-                    'q': query + ' -shorts',  # Menolak video yang memakai hashtag shorts
-                    'part': 'snippet', 
-                    'type': 'video', 
-                    'maxResults': min(25, max_results), # Ambil 25 medium, 25 long (total max 50)
-                    'order': 'viewCount', 
-                    'publishedAfter': published_after,
-                    'videoDuration': dur
-                }
-                
-                if region_code: params['regionCode']=region_code
-                if category_id: params['videoCategoryId']=category_id
-                
-                res=youtube.search().list(**params).execute()
-                ids += [x['id']['videoId'] for x in res.get('items',[]) if x.get('id',{}).get('videoId')]
-            
-            ids=list(dict.fromkeys(ids))[:50]
-            if not ids: return []
-            
-            stats=youtube.videos().list(id=','.join(ids),part='snippet,statistics,contentDetails').execute()
-            raw=process_video_response(stats.get('items',[]),youtube,region_code)
-            
-            candidates=[]
-            for v in raw:
-                # 3. Filter akhir untuk memastikan durasi > 3 menit
-                if v.get('duration_seconds',0) > 180 and v.get('shorts_confidence', 100) < 40:
-                    candidates.append(v)
-                    
-            candidates=enrich_viral_metrics(candidates,query)
-            save_video_snapshots(candidates)
-            st.session_state.current_api_index=key_idx
-            return candidates[:max_results]
-        except Exception as e:
-            if 'quota' in str(e).lower() or '403' in str(e): continue
-            st.error(f'❌ Viral Intelligence API error: {e}'); return []
-    st.error('❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!'); return []
+        velocity, acceleration, previous_vph, snapshot_count = calculate_v2_velocity_and_acceleration(v)
+        v['velocity_vph'] = int(max(0, velocity))
+        v['vph'] = v['velocity_vph']
+        v['vph_fmt'] = f"{v['velocity_vph']:,}"
+        v['previous_vph'] = previous_vph
+        v['acceleration'] = round(acceleration, 2)
+        v['snapshot_count'] = snapshot_count
+
+        baseline = baselines.get(v.get('channel_id'), {})
+        baseline_views = float(baseline.get('median_views', 0))
+        baseline_vph = float(baseline.get('median_vph', 0))
+        v['channel_baseline_views'] = int(baseline_views)
+        v['channel_baseline_vph'] = int(baseline_vph)
+        v['channel_baseline_samples'] = int(baseline.get('sample_size', 0))
+        velocity_multiple = velocity / baseline_vph if baseline_vph > 0 else 0
+        views_multiple = v.get('raw_views', 0) / baseline_views if baseline_views > 0 else 0
+        v['velocity_baseline_multiple'] = round(velocity_multiple, 2)
+        v['views_baseline_multiple'] = round(views_multiple, 2)
+        if velocity_multiple > 0 and views_multiple > 0:
+            v['channel_breakout_multiple'] = round(0.7 * velocity_multiple + 0.3 * views_multiple, 2)
+        else:
+            v['channel_breakout_multiple'] = round(max(velocity_multiple, views_multiple), 2)
+
+        title_words = set(re.findall(r'\w+', (v.get('title', '') + ' ' + v.get('description', '')).lower()))
+        v['query_relevance'] = min(100, 40 + 20 * len(q_words & title_words)) if q_words else 70
+        v['breakout_score'] = calculate_breakout_score(v)
+        v['viral_score'] = v['breakout_score']  # backwards-compatible export
+        v['viral_label'] = breakout_label(v['breakout_score'])
+        v['breakout'] = v['breakout_score'] >= 70
+
+        reasons = []
+        if velocity_multiple >= 5: reasons.append(f"{velocity_multiple:.1f}x di atas velocity normal channel")
+        elif velocity > 0 and baseline_vph <= 0: reasons.append("channel baseline belum cukup terbentuk")
+        if acceleration >= 2: reasons.append(f"velocity naik {acceleration:.1f}x")
+        if v.get('ratio', 0) >= 2: reasons.append(f"views {v['ratio']:.1f}x subscriber")
+        if age_hours <= 24: reasons.append(f"baru {age_hours:.1f} jam")
+        elif age_hours <= 72: reasons.append(f"baru {age_hours/24:.1f} hari")
+        if v.get('er', 0) >= 5: reasons.append(f"engagement {v['er']:.1f}%")
+        if not reasons: reasons.append("velocity awal sedang dipantau")
+        v['breakout_reasons'] = reasons[:4]
+    return sorted(results, key=lambda x: x.get('breakout_score', 0), reverse=True)
+
+
+def search_viral_shorts(query, region_code='ID', category_id=None, max_results=30):
+    """Backward-compatible alias. Viral Intelligence now means NEW LONG-FORM."""
+    return search_viral_longform(query, region_code, category_id, max_results, freshness_days=7, min_duration_seconds=240)
+
 
 def analyze_winning_patterns(results):
     if not results: return {}
-    top=sorted(results,key=lambda x:x.get('viral_score',0),reverse=True)[:20]
-    words=Counter(); title_patterns=Counter(); durations=[]; scores=[]
+    top = sorted(results, key=lambda x: x.get('breakout_score', 0), reverse=True)[:20]
+    words, title_patterns, durations, scores = Counter(), Counter(), [], []
     for v in top:
-        words.update(re.findall(r'\w+',v.get('title','').lower()))
-        durations.append(v.get('duration_seconds',0)); scores.append(v.get('viral_score',0))
-        t=v.get('title','')
-        if '?' in t: title_patterns['Question']+=1
-        if any(c.isdigit() for c in t): title_patterns['Number/List']+=1
-        if re.search(r'\b(you|your|how|why|what|cara|ternyata|ternyata|rahasia|jangan|ternyata)\b',t,re.I): title_patterns['Curiosity/Promise']+=1
-        if '!' in t: title_patterns['Emotional punctuation']+=1
-    common=[w for w,c in words.most_common(15) if len(w)>3]
-    return {'top_count':len(top),'avg_duration':round(sum(durations)/len(durations),1) if durations else 0,'avg_score':round(sum(scores)/len(scores),1) if scores else 0,'keywords':common[:10],'title_patterns':title_patterns,'top_videos':top}
+        words.update(re.findall(r'\w+', v.get('title', '').lower()))
+        durations.append(v.get('duration_seconds', 0)); scores.append(v.get('breakout_score', 0))
+        t = v.get('title', '')
+        if '?' in t: title_patterns['Question'] += 1
+        if any(c.isdigit() for c in t): title_patterns['Number/List'] += 1
+        if re.search(r'\b(you|your|how|why|what|cara|ternyata|rahasia|jangan)\b', t, re.I): title_patterns['Curiosity/Promise'] += 1
+        if '!' in t: title_patterns['Emotional punctuation'] += 1
+    common = [w for w, c in words.most_common(15) if len(w) > 3]
+    return {
+        'top_count': len(top),
+        'avg_duration': round(sum(durations) / len(durations), 1) if durations else 0,
+        'avg_score': round(sum(scores) / len(scores), 1) if scores else 0,
+        'keywords': common[:10], 'title_patterns': title_patterns, 'top_videos': top
+    }
+
 
 def channel_outliers(results):
-    groups={}
-    for v in results: groups.setdefault(v.get('channel_id'),[]).append(v)
-    out=[]
+    groups = {}
+    for v in results: groups.setdefault(v.get('channel_id'), []).append(v)
+    out = []
     for cid, vids in groups.items():
-        avg=sum(x.get('views',0) for x in vids)/len(vids)
+        avg = sum(x.get('views', 0) for x in vids) / len(vids)
         for v in vids:
-            ratio=(v.get('views',0)/max(avg,1))
-            if ratio>=3: out.append({**v,'outlier_multiple':round(ratio,1)})
-    return sorted(out,key=lambda x:x['outlier_multiple'],reverse=True)
+            ratio = v.get('views', 0) / max(avg, 1)
+            if ratio >= 3: out.append({**v, 'outlier_multiple': round(ratio, 1)})
+    return sorted(out, key=lambda x: x['outlier_multiple'], reverse=True)
+
 
 def small_channel_gems(results):
-    return sorted([v for v in results if int(v.get('raw_subs',0))<=100000 and v.get('ratio',0)>=5 and v.get('viral_score',0)>=55], key=lambda x:x.get('viral_score',0), reverse=True)
+    return sorted([
+        v for v in results
+        if int(v.get('raw_subs', 0)) <= 100000 and v.get('channel_breakout_multiple', 0) >= 3
+        and v.get('breakout_score', 0) >= 55
+    ], key=lambda x: x.get('breakout_score', 0), reverse=True)
+
+
+def radar_chart(video):
+    labels = ['Velocity', 'Acceleration', 'Channel\nBreakout', 'Views/Subs', 'Engagement', 'Freshness']
+    values = [
+        normalize_score(math.log10(max(video.get('velocity_vph', 0), 1)), 1, 5),
+        normalize_score(math.log10(max(video.get('acceleration', 1), 0.1)), -1, 1),
+        normalize_score(math.log10(max(video.get('channel_breakout_multiple', 0.1), 0.1)), -1, 1.5),
+        normalize_score(math.log10(max(video.get('ratio', 0.01), 0.01)), -1, 2),
+        normalize_score(video.get('er', 0), 0, 10),
+        max(0, min(100, 100 - (video.get('age_hours', 999) / 168) * 100)),
+    ]
+    angles = [i * 2 * math.pi / len(labels) for i in range(len(labels))]
+    values += values[:1]; angles += angles[:1]
+    fig, ax = plt.subplots(figsize=(5, 5), subplot_kw=dict(polar=True))
+    ax.plot(angles, values, linewidth=2)
+    ax.fill(angles, values, alpha=0.15)
+    ax.set_ylim(0, 100); ax.set_yticks([25, 50, 75, 100]); ax.set_yticklabels(['25', '50', '75', '100'])
+    ax.set_xticks(angles[:-1]); ax.set_xticklabels(labels)
+    ax.set_title(f"Breakout Radar — {video.get('breakout_score', 0):.0f}/100", pad=20, fontweight='bold')
+    ax.grid(alpha=0.25)
+    return fig
+
+
+def build_content_opportunity(video, query=''):
+    duration = int(video.get('duration_seconds', 0))
+    minutes = duration / 60 if duration else 0
+    keywords = extract_keywords(video.get('title', '') + ' ' + video.get('description', ''))[:6]
+    angle = 'angle yang sama dengan diferensiasi lebih kuat'
+    if '?' in video.get('title', ''): angle = 'ubah menjadi format problem → experiment → result'
+    elif any(c.isdigit() for c in video.get('title', '')): angle = 'ubah menjadi list dengan hasil yang bisa dibuktikan'
+    elif any(w in video.get('title', '').lower() for w in ['how', 'cara', 'tutorial']): angle = 'buat versi lebih spesifik untuk pemula dengan hasil akhir yang jelas'
+    return {
+        'topic': ', '.join(keywords) or query,
+        'recommended_duration': f"{max(6, round(minutes))}-{max(10, round(minutes + 5))} menit" if minutes else '8-15 menit',
+        'hook': f"Mulai dari masalah/hasil paling kuat terkait {keywords[0] if keywords else query}, bukan intro panjang.",
+        'angle': angle,
+        'title_formula': f"{keywords[0].title() if keywords else query.title()}: [hasil/temuan utama] yang tidak banyak orang tahu",
+        'thumbnail': '1 objek/hasil utama + ekspresi/kontras visual kuat + 2-4 kata besar; hindari menyalin thumbnail asli.',
+        'why_now': f"Video referensi masih fresh ({video.get('age_hours', 0):.1f} jam) dan memiliki breakout score {video.get('breakout_score', 0):.0f}/100.",
+    }
+
+
+def generate_ai_content_opportunity(video, query):
+    if not GEMINI_API_KEY:
+        return build_content_opportunity(video, query)
+    compact = {
+        'query': query, 'title': video.get('title'), 'duration': video.get('duration'),
+        'views': video.get('raw_views'), 'velocity_vph': video.get('velocity_vph'),
+        'acceleration': video.get('acceleration'), 'channel_breakout_multiple': video.get('channel_breakout_multiple'),
+        'ratio': video.get('ratio'), 'engagement': video.get('er'), 'keywords': video.get('keywords', [])
+    }
+    prompt = f"""Buat content opportunity dari video YouTube yang sedang breakout. Jangan menyalin video.
+Data: {json.dumps(compact, ensure_ascii=False)}
+Berikan singkat: 1) topic gap, 2) hook original, 3) angle berbeda, 4) title formula, 5) thumbnail concept, 6) recommended duration, 7) why-now. Jangan mengarang fakta di luar data."""
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}'
+    try:
+        r = requests.post(url, headers={'Content-Type': 'application/json'}, json={'contents': [{'parts': [{'text': prompt}]}]}, timeout=60)
+        r.raise_for_status()
+        return r.json()['candidates'][0]['content']['parts'][0]['text']
+    except Exception:
+        return build_content_opportunity(video, query)
+
 
 def generate_ai_winner_analysis(results, query):
+    if not results: return 'Tidak ada data.'
     if not GEMINI_API_KEY: return '⚠️ GEMINI_API_KEY belum diisi.'
-    top=sorted(results,key=lambda x:x.get('viral_score',0),reverse=True)[:15]
-    compact=[{'title':v['title'],'views':v['views'],'vph':v['vph'],'ratio':round(v['ratio'],1),'er':v['er'],'duration':v['duration'],'score':v.get('viral_score',0),'accel':v.get('acceleration',1)} for v in top]
-    prompt=f"""Analisis data pemenang YouTube (Video Panjang) berikut untuk niche '{query}'. Jangan mengarang data. Temukan pola yang benar-benar terlihat: hook/judul, topik, durasi, velocity, ratio, engagement, acceleration, dan peluang yang bisa ditiru tanpa copy. Berikan: 1) Why winners win, 2) Winning formula, 3) 10 content angles, 4) red flags. Data: {json.dumps(compact,ensure_ascii=False)}"""
-    url=f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}'
+    top = sorted(results, key=lambda x: x.get('breakout_score', 0), reverse=True)[:12]
+    compact = [{
+        'title': v['title'], 'views': v['views'], 'velocity_vph': v.get('velocity_vph', 0),
+        'acceleration': v.get('acceleration', 1), 'channel_multiple': v.get('channel_breakout_multiple', 0),
+        'ratio': round(v.get('ratio', 0), 1), 'er': v.get('er', 0),
+        'duration': v.get('duration'), 'score': v.get('breakout_score', 0)
+    } for v in top]
+    prompt = f"""Analisis kandidat long-form baru untuk niche '{query}'. Jangan mengarang data. Temukan pola velocity, acceleration, channel baseline, durasi, judul, engagement, dan content opportunity. Berikan: Why breakout, winning formula, 5 content opportunities, red flags. Data: {json.dumps(compact, ensure_ascii=False)}"""
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}'
     try:
-        r=requests.post(url,headers={'Content-Type':'application/json'},json={'contents':[{'parts':[{'text':prompt}]}]},timeout=60); r.raise_for_status()
+        r = requests.post(url, headers={'Content-Type': 'application/json'}, json={'contents': [{'parts': [{'text': prompt}]}]}, timeout=60); r.raise_for_status()
         return r.json()['candidates'][0]['content']['parts'][0]['text']
     except Exception as e: return f'❌ Gagal analisis AI: {e}'
-
-def get_published_after_rfc3339(days):
-    return (datetime.utcnow() - timedelta(days=days)).isoformat("T") + "Z" if days else None
-
-def get_channel_subs(youtube, channel_ids):
-    try:
-        result = {}
-        # YouTube channel ID filters are safest in batches of 50.
-        for start in range(0, len(channel_ids), 50):
-            batch = channel_ids[start:start + 50]
-            res = youtube.channels().list(id=','.join(batch), part='statistics').execute()
-            result.update({
-                item['id']: int(item['statistics'].get('subscriberCount', 0))
-                for item in res.get('items', [])
-            })
-        return result
-    except Exception as e:
-        if "quota" in str(e).lower() or "403" in str(e): raise e
-        return {}
-
-def smart_summarize(text):
-    if not text: return ["Tidak ada deskripsi."]
-    lines = [l.strip() for l in re.sub(r'http\S+', '', text).split('\n') if len(l.strip()) > 5]
-    spam = ['subscribe', 'follow', 'instagram', 'tiktok', 'donasi', 'saweria', 'copyright']
-    important = [l for l in lines if len(l) > 15 and not any(s in l.lower() for s in spam)]
-    return important[:4] if important else (lines[:3] if lines else ["Deskripsi terlalu pendek."])
-
-def extract_keywords(text):
-    words = [w for w in re.findall(r'\w+', text.lower()) if len(w) > 3 and w not in ['yang', 'dan', 'di', 'ke', 'dari', 'ini', 'itu', 'untuk', 'dengan', 'adalah', 'video', 'saya', 'aku', 'the', 'and', 'to', 'of', 'in', 'is', 'for', 'with']]
-    return [item[0] for item in Counter(words).most_common(5)]
-
-def analyze_channel_deep(channel_id):
-    for attempt in range(len(API_KEYS)):
-        key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
-        youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
-        try:
-            ch_data = youtube.channels().list(id=channel_id, part='snippet,statistics,contentDetails').execute()['items'][0]
-            uploads_id = ch_data['contentDetails']['relatedPlaylists']['uploads']
-            
-            pl_res = youtube.playlistItems().list(playlistId=uploads_id, part='snippet', maxResults=15).execute()
-            vid_ids = [item['snippet']['resourceId']['videoId'] for item in pl_res.get('items', [])]
-            
-            recent_videos = []
-            all_tags = []
-            upload_hours = []
-            
-            if vid_ids:
-                stats = youtube.videos().list(id=','.join(vid_ids), part='snippet,statistics').execute()
-                for i, item in enumerate(stats['items']):
-                    snippet = item['snippet']
-                    views = int(item['statistics'].get('viewCount', 0))
-                    try:
-                        pub_dt = parse_yt_date(snippet['publishedAt']) + timedelta(hours=7)
-                        upload_hours.append(pub_dt.hour)
-                    except: pass
-                    
-                    vid_tags = snippet.get('tags', [])
-                    all_tags.extend(vid_tags)
-                    
-                    if i < 5:
-                        recent_videos.append({
-                            'title': snippet['title'], 
-                            'views': format_number(views),
-                            'raw_views': views,
-                            'date': parse_yt_date(snippet['publishedAt']).strftime("%d %b %Y"), 
-                            'thumb': snippet['thumbnails'].get('medium', snippet['thumbnails'].get('default', {}))['url']
-                        })
-            
-            best_hour_str = "Tidak diketahui"
-            if upload_hours:
-                most_common_hour = Counter(upload_hours).most_common(1)[0][0]
-                best_hour_str = f"Pukul {most_common_hour:02d}:00 WIB"
-                
-            top_tags = Counter(all_tags).most_common(15)
-            avg_views_calc = sum([v['raw_views'] for v in recent_videos]) / len(recent_videos) if recent_videos else 0
-
-            st.session_state.current_api_index = key_idx
-            return {
-                'title': ch_data['snippet']['title'], 
-                'thumb': ch_data['snippet']['thumbnails']['medium']['url'],
-                'custom_url': ch_data['snippet'].get('customUrl', ''), 
-                'subs': format_number(int(ch_data['statistics'].get('subscriberCount', 0))),
-                'total_views': format_number(int(ch_data['statistics'].get('viewCount', 0))), 
-                'video_count': format_number(int(ch_data['statistics'].get('videoCount', 0))),
-                'avg_recent_views': format_number(avg_views_calc),
-                'recent_videos': recent_videos,
-                'favorite_upload_hour': best_hour_str,
-                'top_seo_tags': top_tags
-            }
-        except Exception as e:
-            if "quota" in str(e).lower() or "403" in str(e):
-                continue
-            else:
-                st.error(f"❌ Gagal membedah channel. Detail: {str(e)}")
-                return None
-    st.error("❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!")
-    return None
-
-def process_video_response(items, youtube, region_code):
-    channel_ids = list(set([item['snippet']['channelId'] for item in items]))
-    subs_map = get_channel_subs(youtube, channel_ids)
-    results = []
-    
-    for i, item in enumerate(items):
-        try:
-            stats = item.get('statistics', {})
-            snippet = item.get('snippet', {})
-            content = item.get('contentDetails', {})
-            views = int(stats.get('viewCount', 0))
-            likes = int(stats.get('likeCount', 0))
-            comments = int(stats.get('commentCount', 0))
-            subs = subs_map.get(snippet.get('channelId', ''), 0)
-            
-            thumbnails = snippet.get('thumbnails', {})
-            best_thumb = thumbnails.get('maxres') or thumbnails.get('high') or thumbnails.get('medium') or thumbnails.get('default') or {}
-            
-            desc = snippet.get('description', '')
-            tags = snippet.get('tags', [])[:10]
-            seo_score, seo_checks = calculate_seo_score(snippet.get('title', ''), desc, tags)
-            video_id = item['id'] if isinstance(item['id'], str) else item['id'].get('videoId', '')
-
-            results.append({
-                'rank': i + 1, 'id': video_id, 'channel_id': snippet.get('channelId', ''),
-                'title': snippet.get('title', 'Untitled'), 'thumbnail': best_thumb.get('url', ''),
-                'channel': snippet.get('channelTitle', 'Unknown'), 
-                'published_full': snippet.get('publishedAt', ''),
-                'published_simple': parse_yt_date(snippet['publishedAt']).strftime("%d %b %Y"),
-                'duration': parse_duration(content.get('duration', 'PT0S')), 'duration_iso': content.get('duration','PT0S'), 'duration_seconds': parse_iso_duration_seconds(content.get('duration','PT0S')), 'description': desc,
-                'summary': smart_summarize(desc), 'keywords': extract_keywords(desc + " " + snippet.get('title', '')),
-                'views': views, 'raw_views': views, 'views_fmt': format_number(views), 'likes': format_number(likes), 'raw_likes': likes, 'comments': format_number(comments), 'raw_comments': comments, 'raw_subs': subs,
-                'vph': calculate_vph(snippet.get('publishedAt', ''), views), 'vph_fmt': f"{calculate_vph(snippet.get('publishedAt', ''), views):,.0f}", 
-                'earnings': estimate_earnings(views, region_code), 'er': calculate_er(views, likes, comments), 
-                'subs': format_number(subs), 'ratio': (views/subs if subs > 0 else 0), 'ratio_label': f"{(views/subs if subs>0 else 0):.1f}x", 
-                'is_gem': (views/subs if subs > 0 else 0) > 1.5, 'tags': tags, 'seo_score': seo_score, 'seo_checks': seo_checks,
-                'link': f"https://youtu.be/{video_id}"
-            })
-        except: continue 
-    return results
-
-def search_youtube(query, region_code='ID', duration='any', category_id=None, published_after=None, license_type=None, sort_order='relevance', max_results=12):
-    for attempt in range(len(API_KEYS)):
-        key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
-        youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
-        try:
-            api_order = 'viewCount' if sort_order in ['vph_custom', 'ratio_custom', 'seo_custom'] else sort_order
-            params = {'q': query, 'part': 'snippet', 'type': 'video', 'maxResults': max_results, 'order': api_order}
-            
-            if region_code: params['regionCode'] = region_code
-            if duration != 'any': params['videoDuration'] = duration
-            if category_id: params['videoCategoryId'] = category_id
-            if published_after: params['publishedAfter'] = published_after
-            if license_type: params['videoLicense'] = license_type
-            
-            search_res = youtube.search().list(**params).execute()
-            vid_ids = [item['id']['videoId'] for item in search_res.get('items', []) if 'videoId' in item['id']]
-            if not vid_ids: return []
-
-            stats_res = youtube.videos().list(part='snippet,statistics,contentDetails', id=','.join(vid_ids)).execute()
-            results = process_video_response(stats_res.get('items', []), youtube, region_code)
-            
-            if sort_order == 'vph_custom': return sorted(results, key=lambda x: x['vph'], reverse=True)
-            elif sort_order == 'ratio_custom': return sorted(results, key=lambda x: x['ratio'], reverse=True)
-            elif sort_order == 'seo_custom': return sorted(results, key=lambda x: x['seo_score'], reverse=True)
-            
-            st.session_state.current_api_index = key_idx
-            return results
-        except Exception as e:
-            if "quota" in str(e).lower() or "403" in str(e):
-                continue
-            else:
-                st.error(f"❌ Terjadi kesalahan API YouTube. Detail: {e}")
-                return []
-    st.error("❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!")
-    return []
-
-def get_trending_videos(region_code='ID', category_id=None, max_results=12):
-    for attempt in range(len(API_KEYS)):
-        key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
-        youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
-        try:
-            params = {'part': 'snippet,statistics,contentDetails', 'chart': 'mostPopular', 'regionCode': region_code, 'maxResults': max_results}
-            if category_id: params['videoCategoryId'] = category_id
-            response = youtube.videos().list(**params).execute()
-            
-            st.session_state.current_api_index = key_idx
-            return process_video_response(response.get('items', []), youtube, region_code)
-        except Exception as e:
-            if "quota" in str(e).lower() or "403" in str(e):
-                continue
-            else:
-                st.error(f"❌ Error API: {e}")
-                return []
-    st.error("❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!")
-    return []
 
 # --- CALLBACK FUNCTIONS (AMAN) ---
 def goto_analyzer(channel_id):
@@ -828,12 +881,16 @@ with st.sidebar:
         btn_trending = st.button("🔥 Lihat Trending", type="primary", use_container_width=True)
 
     elif mode == "⚡ Viral Intelligence":
-        st.header("⚡ Viral Intelligence")
+        st.header("⚡ Viral Intelligence V2")
         viral_query = st.text_input("Niche / Keyword", value=st.session_state.search_query, placeholder="Misal: AI tools, football, cooking")
         country_name = st.selectbox("🌍 Negara", list(COUNTRY_CODES.keys()), index=1, key="viral_country")
         cat_name = st.selectbox("Kategori", list(CATEGORIES.keys()), key="viral_cat")
+        freshness_label = st.selectbox("🕒 Freshness", ["24 Jam", "3 Hari", "7 Hari", "14 Hari", "30 Hari"], index=2, key="viral_freshness")
+        freshness_days = {"24 Jam": 1, "3 Hari": 3, "7 Hari": 7, "14 Hari": 14, "30 Hari": 30}[freshness_label]
+        min_long_label = st.selectbox("🎬 Minimum Durasi", ["4 Menit+", "8 Menit+", "20 Menit+"], index=0, key="viral_min_duration")
+        min_duration_seconds = {"4 Menit+": 240, "8 Menit+": 480, "20 Menit+": 1200}[min_long_label]
         max_res = st.slider("Jumlah Kandidat", 10, 50, 30, key="viral_max")
-        btn_viral = st.button("🚀 Scan Winning Viral", type="primary", use_container_width=True)
+        btn_viral = st.button("🚀 Scan New Breakout Videos", type="primary", use_container_width=True)
 
     elif mode == "🧭 Direktori Channel":
         st.info("Pencarian utama direktori telah dipindah ke tengah layar utama.")
@@ -865,7 +922,7 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
 
     if mode == "🔍 Pencarian Video" and 'btn_cari' in locals() and btn_cari and st.session_state.search_query:
         st.session_state.stalk_channel = None 
-        dur_map = {'Short (<4m)': 'short', 'Medium (4-20m)': 'long'}.get(dur, 'any')
+        dur_map = {'Short (<4m)': 'short', 'Medium (4-20m)': 'medium', 'Long (>20m)': 'long'}.get(dur, 'any')
         with st.spinner(f"Mencari data video untuk '{st.session_state.search_query}'..."):
             st.session_state.results = search_youtube(
                 query=st.session_state.search_query, region_code=COUNTRY_CODES[country_name], duration=dur_map,
@@ -971,73 +1028,117 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                             try: st.download_button("⬇️ Thumb", requests.get(vid['thumbnail']).content, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
                             except: pass
 
-# --- MODE VIRAL INTELLIGENCE ---
+# --- MODE VIRAL INTELLIGENCE V2 ---
 elif mode == "⚡ Viral Intelligence":
-    st.title("⚡ Viral Intelligence — Detect Before It Explodes")
+    st.title("⚡ Viral Intelligence V2 — Detect Before It Explodes")
+    st.caption("Fokus: video panjang yang baru terbit dan menunjukkan sinyal breakout — bukan video Shorts lama.")
     if 'btn_viral' in locals() and btn_viral and viral_query:
-        st.session_state.search_query=viral_query
-        with st.spinner("🔎 Scanning Video Panjang + velocity + breakout signals..."):
-            st.session_state.viral_results=search_viral_videos(viral_query, COUNTRY_CODES[country_name], CATEGORIES[cat_name], max_res)
-    results=st.session_state.get('viral_results',[])
+        st.session_state.search_query = viral_query
+        with st.spinner("🔎 Discovery: mencari video long-form baru + breakout candidates..."):
+            st.session_state.viral_results = search_viral_longform(
+                viral_query, COUNTRY_CODES[country_name], CATEGORIES[cat_name], max_res,
+                freshness_days=freshness_days, min_duration_seconds=min_duration_seconds
+            )
+    results = st.session_state.get('viral_results', [])
     if results:
-        patterns=analyze_winning_patterns(results)
-        gems=small_channel_gems(results); outs=channel_outliers(results)
-        st.success(f"{len(results)} kandidat dianalisis — fokus pada velocity, acceleration, ratio, engagement, dan breakout.")
-        top=results[0]
-        m1,m2,m3,m4,m5=st.columns(5)
-        m1.metric("🏆 Top Score", top.get('viral_score',0))
-        m2.metric("📈 VPH", f"{top.get('vph',0):,}")
+        patterns = analyze_winning_patterns(results)
+        gems = small_channel_gems(results)
+        st.success(f"{len(results)} kandidat long-form baru dianalisis dari window {freshness_label}.")
+
+        top = results[0]
+        m1,m2,m3,m4,m5 = st.columns(5)
+        m1.metric("🏆 Breakout Score", f"{top.get('breakout_score',0):.0f}/100")
+        m2.metric("🔥 Velocity", f"{top.get('velocity_vph',0):,} VPH")
         m3.metric("⚡ Acceleration", f"{top.get('acceleration',1):.1f}x")
-        m4.metric("💎 Views/Subs", f"{top.get('ratio',0):.1f}x")
-        m5.metric("⏱️ Durasi", top.get('duration',"0:00"))
-        st.markdown("### 🚀 Breakout Detector")
-        breakouts=[x for x in results if x.get('breakout')]
-        if breakouts:
-            st.dataframe(pd.DataFrame([{'Title':x['title'],'Label':x['viral_label'],'Score':x['viral_score'],'VPH':x['vph'],'Acceleration':f"{x['acceleration']:.1f}x",'Views/Subs':f"{x['ratio']:.1f}x"} for x in breakouts[:15]]), use_container_width=True, hide_index=True)
-        else:
-            st.info("Belum ada kandidat breakout kuat pada snapshot ini. Ulangi scan beberapa waktu kemudian agar acceleration mulai terbaca.")
-        st.markdown("### 🏆 Winning Videos")
-        for i,v in enumerate(results[:20],1):
-            with st.container(border=True):
-                c1,c2,c3=st.columns([3,1,1])
-                with c1:
-                    st.markdown(f"**#{i} {v['viral_label']} — Score {v['viral_score']}**")
-                    st.write(v['title'])
-                    st.caption(f"👤 {v['channel']} • 👁️ {v['views_fmt']} • ⏱️ {v['duration']} • 🔥 {v['vph_fmt']} VPH")
-                with c2:
-                    st.metric("Acceleration", f"{v.get('acceleration',1):.1f}x")
-                    st.metric("Ratio", f"{v.get('ratio',0):.1f}x")
-                with c3:
-                    st.metric("ER", f"{v.get('er',0):.2f}%")
-                    st.link_button("▶ Watch", v['link'], use_container_width=True)
-        st.markdown("### 💎 Small Channel Gems")
+        m4.metric("🎯 Channel Breakout", f"{top.get('channel_breakout_multiple',0):.1f}x")
+        m5.metric("⏱️ Age", f"{top.get('age_hours',0):.1f}h")
+
+        st.markdown("### 🚨 Breakout Radar")
+        radar_left, radar_right = st.columns([1, 1.4])
+        with radar_left:
+            st.pyplot(radar_chart(top), use_container_width=True)
+        with radar_right:
+            st.markdown(f"**{top.get('viral_label','NORMAL')} — {top.get('title','')}**")
+            st.write(f"**Channel:** {top.get('channel','Unknown')} • **Subscribers:** {top.get('subs','0')}")
+            st.write(f"**Views:** {top.get('views_fmt','0')} • **Duration:** {top.get('duration','N/A')}")
+            st.write("**Kenapa menarik:**")
+            for reason in top.get('breakout_reasons', []):
+                st.write(f"• {reason}")
+            if top.get('channel_baseline_samples', 0) < 3:
+                st.warning("Baseline channel masih tipis. Score sebaiknya dianggap sinyal awal, bukan kepastian viral.")
+            st.link_button("▶ Tonton Video", top['link'], use_container_width=True)
+
+        st.markdown("### 🚀 New Breakout Candidates")
+        table_rows = []
+        for i, x in enumerate(results[:20], 1):
+            table_rows.append({
+                '#': i, 'Label': x.get('viral_label'), 'Title': x.get('title'),
+                'Score': x.get('breakout_score'), 'Age': f"{x.get('age_hours',0):.1f}h",
+                'Velocity': f"{x.get('velocity_vph',0):,}", 'Accel': f"{x.get('acceleration',1):.1f}x",
+                'Channel': f"{x.get('channel_breakout_multiple',0):.1f}x",
+                'Views/Subs': f"{x.get('ratio',0):.1f}x"
+            })
+        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+
+        st.markdown("### 🧠 Candidate Inspector + Radar")
+        pick = st.selectbox("Pilih kandidat", range(min(15, len(results))), format_func=lambda i: results[i]['title'], key="v2_pick")
+        selected = results[pick]
+        c1,c2 = st.columns([1,1.5])
+        with c1:
+            st.pyplot(radar_chart(selected), use_container_width=True)
+        with c2:
+            st.markdown(f"#### {selected['viral_label']} — {selected['breakout_score']:.0f}/100")
+            st.write(f"**{selected['channel']}** • {selected['subs']} subs • {selected['views_fmt']} views • {selected['duration']}")
+            st.write(f"Velocity **{selected['velocity_vph']:,} VPH** • Acceleration **{selected['acceleration']:.1f}x**")
+            st.write(f"Channel baseline: **{selected.get('channel_baseline_vph',0):,} VPH** • Breakout multiple **{selected.get('channel_breakout_multiple',0):.1f}x**")
+            for reason in selected.get('breakout_reasons', []): st.write(f"• {reason}")
+
+        st.markdown("### 💎 Small Channel Breakouts")
         if gems:
-            st.dataframe(pd.DataFrame([{'Title':x['title'],'Channel':x['channel'],'Subs':x['subs'],'Views':x['views_fmt'],'Ratio':f"{x['ratio']:.1f}x",'VPH':x['vph'],'Score':x['viral_score']} for x in gems[:15]]), use_container_width=True, hide_index=True)
-        else: st.info("Belum ada gem yang memenuhi threshold. Coba niche lebih spesifik atau ulangi scan setelah beberapa waktu.")
-        st.markdown("### 🎯 Outlier Detector")
-        if outs:
-            st.dataframe(pd.DataFrame([{'Title':x['title'],'Channel':x['channel'],'Views':x['views_fmt'],'Vs Channel Sample':f"{x['outlier_multiple']}x",'Score':x['viral_score']} for x in outs[:15]]), use_container_width=True, hide_index=True)
-        else: st.info("Belum ada outlier ≥3x dari baseline sample channel.")
+            st.dataframe(pd.DataFrame([{
+                'Title': x['title'], 'Channel': x['channel'], 'Subs': x['subs'], 'Views': x['views_fmt'],
+                'Velocity': x['velocity_vph'], 'Channel Breakout': f"{x.get('channel_breakout_multiple',0):.1f}x",
+                'Score': x['breakout_score']
+            } for x in gems[:15]]), use_container_width=True, hide_index=True)
+        else:
+            st.info("Belum ada small-channel breakout yang kuat di scan ini.")
+
+        st.markdown("### 🎯 Content Opportunity")
+        opp = build_content_opportunity(selected, viral_query)
+        oc1, oc2 = st.columns(2)
+        with oc1:
+            st.markdown(f"**Topic:** {opp['topic']}")
+            st.markdown(f"**Hook:** {opp['hook']}")
+            st.markdown(f"**Angle:** {opp['angle']}")
+            st.markdown(f"**Duration:** {opp['recommended_duration']}")
+        with oc2:
+            st.markdown(f"**Title Formula:** {opp['title_formula']}")
+            st.markdown(f"**Thumbnail:** {opp['thumbnail']}")
+            st.markdown(f"**Why Now:** {opp['why_now']}")
+        if st.button("🤖 Generate Opportunity dengan AI", key="ai_content_opp"):
+            with st.spinner("AI mencari angle original dari sinyal breakout..."):
+                ai_opp = generate_ai_content_opportunity(selected, viral_query)
+                if isinstance(ai_opp, dict):
+                    st.json(ai_opp)
+                else:
+                    st.markdown(f"<div class='ai-box'>{ai_opp}</div>", unsafe_allow_html=True)
+
         st.markdown("### 🧬 Winning Pattern Detector")
-        p1,p2,p3=st.columns(3)
-        p1.metric("Top Winners",patterns.get('top_count',0)); p2.metric("Avg Duration",f"{patterns.get('avg_duration',0):.0f}s"); p3.metric("Avg Viral Score",patterns.get('avg_score',0))
-        st.write("**Keyword yang paling sering muncul:**", ", ".join(patterns.get('keywords',[])) or "—")
+        p1,p2,p3 = st.columns(3)
+        p1.metric("Top Winners", patterns.get('top_count',0))
+        p2.metric("Avg Duration", f"{patterns.get('avg_duration',0):.0f}s")
+        p3.metric("Avg Breakout Score", patterns.get('avg_score',0))
+        st.write("**Keyword:**", ", ".join(patterns.get('keywords',[])) or "—")
         st.write("**Pola judul:**", ", ".join([f"{k} ({v})" for k,v in patterns.get('title_patterns',{}).most_common()]) or "—")
-        st.markdown("### 🧬 Winning Video DNA / Clone Search")
-        dna_idx=st.selectbox("Pilih video pemenang", range(min(10,len(results))), format_func=lambda i: results[i]['title'], key="dna_pick")
-        dna=results[dna_idx]
-        dna_terms=" ".join(extract_keywords(dna['title']+' '+dna.get('description',''))[:4])
-        st.code(f"Topic: {dna_terms}\nDuration: {dna.get('duration_seconds',0)}s\nVPH: {dna.get('vph',0):,}\nAcceleration: {dna.get('acceleration',1):.1f}x\nViews/Subs: {dna.get('ratio',0):.1f}x\nEngagement: {dna.get('er',0):.2f}%")
-        if st.button("🔍 Cari Video dengan DNA Serupa", key="dna_search"):
-            with st.spinner("Mencari pola serupa..."):
-                st.session_state.dna_results=search_viral_videos(dna_terms or viral_query, COUNTRY_CODES[country_name], CATEGORIES[cat_name], 20)
-        if st.session_state.get('dna_results'):
-            st.dataframe(pd.DataFrame([{'Title':x['title'],'Score':x['viral_score'],'VPH':x['vph'],'Ratio':f"{x['ratio']:.1f}x",'Acceleration':f"{x['acceleration']:.1f}x"} for x in st.session_state.dna_results[:15]]), use_container_width=True, hide_index=True)
-        st.markdown("### 🤖 AI Winner Analysis")
-        if st.button("🧠 Analisis Kenapa Mereka Menang", key="ai_winner"):
-            with st.spinner("AI membaca pola dari winner, bukan menebak..."):
+
+        st.markdown("### 🤖 AI Breakout Analysis")
+        if st.button("🧠 Analisis Kenapa Video Ini Berpotensi Meledak", key="ai_winner"):
+            with st.spinner("AI membaca pola velocity + baseline + content..."):
                 st.markdown(f"<div class='ai-box'>{generate_ai_winner_analysis(results, viral_query)}</div>", unsafe_allow_html=True)
-        st.download_button("💾 Export Viral Intelligence CSV", pd.DataFrame(results).to_csv(index=False), "viral_intelligence.csv", "text/csv", use_container_width=True)
+
+        st.download_button("💾 Export Viral Intelligence V2 CSV", pd.DataFrame(results).to_csv(index=False), "viral_intelligence_v2.csv", "text/csv", use_container_width=True)
+    else:
+        st.info("Belum ada kandidat. Pilih niche lalu jalankan scan. V2 hanya memasukkan video baru long-form sesuai freshness window.")
 
 # --- MODE DIREKTORI CHANNEL ---
 elif mode == "🧭 Direktori Channel":
