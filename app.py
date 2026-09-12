@@ -7,6 +7,8 @@ import requests
 import re
 import urllib.parse
 import json
+import sqlite3
+import math
 from collections import Counter
 from pytrends.request import TrendReq
 from dateutil.relativedelta import relativedelta
@@ -344,6 +346,180 @@ def calculate_seo_score(title, desc, tags):
     else: checks.append("❌ Minim / Tidak Ada Tags")
     return score, checks
 
+# ==========================================
+# VIRAL INTELLIGENCE ENGINE
+# ==========================================
+SNAPSHOT_DB = "niche_hunter_snapshots.db"
+
+def init_snapshot_db():
+    conn = sqlite3.connect(SNAPSHOT_DB)
+    conn.execute("""CREATE TABLE IF NOT EXISTS video_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        video_id TEXT NOT NULL,
+        captured_at TEXT NOT NULL,
+        views INTEGER DEFAULT 0,
+        likes INTEGER DEFAULT 0,
+        comments INTEGER DEFAULT 0,
+        subscribers INTEGER DEFAULT 0
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_video_snapshots ON video_snapshots(video_id, captured_at)")
+    conn.commit(); conn.close()
+
+init_snapshot_db()
+
+def parse_iso_duration_seconds(iso):
+    m = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', iso or '')
+    if not m: return 0
+    h, mi, sec = [int(x or 0) for x in m.groups()]
+    return h*3600 + mi*60 + sec
+
+def shorts_confidence(video):
+    title = (video.get('title') or '').lower()
+    desc = (video.get('description') or '').lower()
+    duration = video.get('duration_seconds', 99999)
+    score = 0
+    if duration <= 60: score += 45
+    elif duration <= 180: score += 35
+    if '#shorts' in title or '#shorts' in desc: score += 35
+    if 'shorts' in title or 'short video' in title or 'vertical' in title: score += 15
+    if 'shorts' in desc: score += 10
+    return min(score, 100)
+
+def save_video_snapshots(results):
+    if not results: return
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(SNAPSHOT_DB)
+    for v in results:
+        conn.execute("INSERT INTO video_snapshots(video_id,captured_at,views,likes,comments,subscribers) VALUES(?,?,?,?,?,?)",
+                     (v['id'], now, int(v.get('raw_views',v.get('views',0))), int(v.get('raw_likes',0)), int(v.get('raw_comments',0)), int(v.get('raw_subs',0))))
+    conn.commit(); conn.close()
+
+def get_previous_snapshot(video_id):
+    conn = sqlite3.connect(SNAPSHOT_DB)
+    row = conn.execute("SELECT captured_at,views,likes,comments,subscribers FROM video_snapshots WHERE video_id=? ORDER BY captured_at DESC LIMIT 1", (video_id,)).fetchall()
+    conn.close()
+    return row[0] if row else None
+
+def calculate_acceleration(video):
+    prev = get_previous_snapshot(video['id'])
+    if not prev: return 1.0, 0
+    prev_time = datetime.fromisoformat(prev[0]); now = datetime.utcnow()
+    hours = max((now-prev_time).total_seconds()/3600, 0.05)
+    prev_vph = max((int(video.get('raw_views',video.get('views',0))) - int(prev[1])) / hours, 0)
+    current_vph = float(video.get('vph',0))
+    if prev_vph <= 0: return 1.0, 0
+    return max(current_vph/prev_vph, 0), int(prev_vph)
+
+def normalize_score(value, low, high):
+    if high <= low: return 50
+    return max(0, min(100, (value-low)/(high-low)*100))
+
+def calculate_viral_score(v):
+    vph_score = normalize_score(math.log10(max(v.get('vph',0),1)), 1, 5)
+    ratio_score = normalize_score(math.log10(max(v.get('ratio',0.01),0.01)), -1, 2)
+    freshness = max(0, min(100, 100 - (v.get('age_hours',999)/168)*100))
+    er_score = normalize_score(v.get('er',0), 0, 10)
+    short_score = v.get('shorts_confidence',0)
+    accel_score = normalize_score(math.log10(max(v.get('acceleration',1),0.1)), -1, 1)
+    relevance = v.get('query_relevance',70)
+    return round(0.28*vph_score + 0.22*ratio_score + 0.10*freshness + 0.10*er_score + 0.10*short_score + 0.15*accel_score + 0.05*relevance, 1)
+
+def viral_label(score):
+    if score >= 85: return '💥 EXPLOSIVE'
+    if score >= 72: return '🔥 VIRAL'
+    if score >= 58: return '🚀 HOT'
+    if score >= 42: return '📈 GROWING'
+    return 'NORMAL'
+
+def enrich_viral_metrics(results, query=''):
+    now = datetime.utcnow()
+    q_words = set(re.findall(r'\w+', query.lower()))
+    for v in results:
+        pub = parse_yt_date(v.get('published_full',''))
+        age_hours = max((now-pub).total_seconds()/3600, 0.05)
+        v['age_hours'] = age_hours
+        v['duration_seconds'] = v.get('duration_seconds', parse_iso_duration_seconds(v.get('duration_iso','')))
+        v['shorts_confidence'] = shorts_confidence(v)
+        accel, prev_vph = calculate_acceleration(v)
+        v['acceleration'] = round(accel, 2)
+        v['previous_vph'] = prev_vph
+        title_words = set(re.findall(r'\w+', (v.get('title','')+' '+v.get('description','')).lower()))
+        v['query_relevance'] = min(100, 40 + 20*len(q_words & title_words)) if q_words else 70
+        v['viral_score'] = calculate_viral_score(v)
+        v['viral_label'] = viral_label(v['viral_score'])
+        v['breakout'] = v['viral_score'] >= 65 and (v['acceleration'] >= 1.5 or v['ratio'] >= 5)
+    return sorted(results, key=lambda x:x['viral_score'], reverse=True)
+
+def search_viral_shorts(query, region_code='ID', category_id=None, max_results=30):
+    for attempt in range(len(API_KEYS)):
+        key_idx=(st.session_state.current_api_index+attempt)%len(API_KEYS)
+        youtube=build('youtube','v3',developerKey=API_KEYS[key_idx])
+        try:
+            ids=[]
+            for q in [query, query+' shorts', query+' #shorts']:
+                params={'q':q,'part':'snippet','type':'video','maxResults':min(50,max_results),'order':'viewCount','videoDuration':'short'}
+                if region_code: params['regionCode']=region_code
+                if category_id: params['videoCategoryId']=category_id
+                res=youtube.search().list(**params).execute()
+                ids += [x['id']['videoId'] for x in res.get('items',[]) if x.get('id',{}).get('videoId')]
+            ids=list(dict.fromkeys(ids))[:50]
+            if not ids: return []
+            stats=youtube.videos().list(id=','.join(ids),part='snippet,statistics,contentDetails').execute()
+            raw=process_video_response(stats.get('items',[]),youtube,region_code)
+            # process_video_response is extended below with raw fields and duration seconds
+            candidates=[]
+            for v in raw:
+                if v.get('duration_seconds',0) <= 180 and v.get('shorts_confidence',100) >= 45:
+                    candidates.append(v)
+            candidates=enrich_viral_metrics(candidates,query)
+            save_video_snapshots(candidates)
+            st.session_state.current_api_index=key_idx
+            return candidates[:max_results]
+        except Exception as e:
+            if 'quota' in str(e).lower() or '403' in str(e): continue
+            st.error(f'❌ Viral Intelligence API error: {e}'); return []
+    st.error('❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!'); return []
+
+def analyze_winning_patterns(results):
+    if not results: return {}
+    top=sorted(results,key=lambda x:x.get('viral_score',0),reverse=True)[:20]
+    words=Counter(); title_patterns=Counter(); durations=[]; scores=[]
+    for v in top:
+        words.update(re.findall(r'\w+',v.get('title','').lower()))
+        durations.append(v.get('duration_seconds',0)); scores.append(v.get('viral_score',0))
+        t=v.get('title','')
+        if '?' in t: title_patterns['Question']+=1
+        if any(c.isdigit() for c in t): title_patterns['Number/List']+=1
+        if re.search(r'\b(you|your|how|why|what|cara|ternyata|ternyata|rahasia|jangan|ternyata)\b',t,re.I): title_patterns['Curiosity/Promise']+=1
+        if '!' in t: title_patterns['Emotional punctuation']+=1
+    common=[w for w,c in words.most_common(15) if len(w)>3]
+    return {'top_count':len(top),'avg_duration':round(sum(durations)/len(durations),1) if durations else 0,'avg_score':round(sum(scores)/len(scores),1) if scores else 0,'keywords':common[:10],'title_patterns':title_patterns,'top_videos':top}
+
+def channel_outliers(results):
+    groups={}
+    for v in results: groups.setdefault(v.get('channel_id'),[]).append(v)
+    out=[]
+    for cid, vids in groups.items():
+        avg=sum(x.get('views',0) for x in vids)/len(vids)
+        for v in vids:
+            ratio=(v.get('views',0)/max(avg,1))
+            if ratio>=3: out.append({**v,'outlier_multiple':round(ratio,1)})
+    return sorted(out,key=lambda x:x['outlier_multiple'],reverse=True)
+
+def small_channel_gems(results):
+    return sorted([v for v in results if int(v.get('raw_subs',0))<=100000 and v.get('ratio',0)>=5 and v.get('viral_score',0)>=55], key=lambda x:x.get('viral_score',0), reverse=True)
+
+def generate_ai_winner_analysis(results, query):
+    if not GEMINI_API_KEY: return '⚠️ GEMINI_API_KEY belum diisi.'
+    top=sorted(results,key=lambda x:x.get('viral_score',0),reverse=True)[:15]
+    compact=[{'title':v['title'],'views':v['views'],'vph':v['vph'],'ratio':round(v['ratio'],1),'er':v['er'],'duration':v['duration'],'score':v.get('viral_score',0),'accel':v.get('acceleration',1)} for v in top]
+    prompt=f"""Analisis data pemenang YouTube Shorts berikut untuk niche '{query}'. Jangan mengarang data. Temukan pola yang benar-benar terlihat: hook/judul, topik, durasi, velocity, ratio, engagement, acceleration, dan peluang yang bisa ditiru tanpa copy. Berikan: 1) Why winners win, 2) Winning formula, 3) 10 content angles, 4) red flags. Data: {json.dumps(compact,ensure_ascii=False)}"""
+    url=f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}'
+    try:
+        r=requests.post(url,headers={'Content-Type':'application/json'},json={'contents':[{'parts':[{'text':prompt}]}]},timeout=60); r.raise_for_status()
+        return r.json()['candidates'][0]['content']['parts'][0]['text']
+    except Exception as e: return f'❌ Gagal analisis AI: {e}'
+
 def get_published_after_rfc3339(days):
     return (datetime.utcnow() - timedelta(days=days)).isoformat("T") + "Z" if days else None
 
@@ -470,9 +646,9 @@ def process_video_response(items, youtube, region_code):
                 'channel': snippet.get('channelTitle', 'Unknown'), 
                 'published_full': snippet.get('publishedAt', ''),
                 'published_simple': parse_yt_date(snippet['publishedAt']).strftime("%d %b %Y"),
-                'duration': parse_duration(content.get('duration', 'PT0S')), 'description': desc,
+                'duration': parse_duration(content.get('duration', 'PT0S')), 'duration_iso': content.get('duration','PT0S'), 'duration_seconds': parse_iso_duration_seconds(content.get('duration','PT0S')), 'description': desc,
                 'summary': smart_summarize(desc), 'keywords': extract_keywords(desc + " " + snippet.get('title', '')),
-                'views': views, 'views_fmt': format_number(views), 'likes': format_number(likes), 'comments': format_number(comments),
+                'views': views, 'raw_views': views, 'views_fmt': format_number(views), 'likes': format_number(likes), 'raw_likes': likes, 'comments': format_number(comments), 'raw_comments': comments, 'raw_subs': subs,
                 'vph': calculate_vph(snippet.get('publishedAt', ''), views), 'vph_fmt': f"{calculate_vph(snippet.get('publishedAt', ''), views):,.0f}", 
                 'earnings': estimate_earnings(views, region_code), 'er': calculate_er(views, likes, comments), 
                 'subs': format_number(subs), 'ratio': (views/subs if subs > 0 else 0), 'ratio_label': f"{(views/subs if subs>0 else 0):.1f}x", 
@@ -572,13 +748,16 @@ if 'rising_trends' not in st.session_state: st.session_state.rising_trends = Non
 if 'channel_search_results' not in st.session_state: st.session_state.channel_search_results = []
 if 'compare_list' not in st.session_state: st.session_state.compare_list = []
 if 'run_dir_search' not in st.session_state: st.session_state.run_dir_search = False
+if 'viral_results' not in st.session_state: st.session_state.viral_results = []
+if 'dna_results' not in st.session_state: st.session_state.dna_results = []
 
 with st.sidebar:
     st.title("🎛️ Menu Navigasi")
     
     mode = st.radio("Pilih Mode:", [
         "🔍 Pencarian Video", 
-        "🔥 Trending (Viral)", 
+        "🔥 Trending (Viral)",
+        "⚡ Viral Intelligence",
         "🧭 Direktori Channel", 
         "🕵️ Analisis Channel", 
         "⚖️ Bandingkan Channel"
@@ -629,6 +808,14 @@ with st.sidebar:
         cat_name = st.selectbox("Kategori (Opsional)", list(CATEGORIES.keys()))
         max_res = st.slider("Jumlah Video Ditampilkan", min_value=5, max_value=50, value=12, step=1)
         btn_trending = st.button("🔥 Lihat Trending", type="primary", use_container_width=True)
+
+    elif mode == "⚡ Viral Intelligence":
+        st.header("⚡ Viral Intelligence")
+        viral_query = st.text_input("Niche / Keyword", value=st.session_state.search_query, placeholder="Misal: AI tools, football, cooking")
+        country_name = st.selectbox("🌍 Negara", list(COUNTRY_CODES.keys()), index=1, key="viral_country")
+        cat_name = st.selectbox("Kategori", list(CATEGORIES.keys()), key="viral_cat")
+        max_res = st.slider("Jumlah Kandidat", 10, 50, 30, key="viral_max")
+        btn_viral = st.button("🚀 Scan Winning Viral", type="primary", use_container_width=True)
 
     elif mode == "🧭 Direktori Channel":
         st.info("Pencarian utama direktori telah dipindah ke tengah layar utama.")
@@ -765,6 +952,74 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                         with c_r:
                             try: st.download_button("⬇️ Thumb", requests.get(vid['thumbnail']).content, f"thumb_{vid['id']}.jpg", "image/jpeg", use_container_width=True)
                             except: pass
+
+# --- MODE VIRAL INTELLIGENCE ---
+elif mode == "⚡ Viral Intelligence":
+    st.title("⚡ Viral Intelligence — Detect Before It Explodes")
+    if 'btn_viral' in locals() and btn_viral and viral_query:
+        st.session_state.search_query=viral_query
+        with st.spinner("🔎 Scanning Shorts + velocity + breakout signals..."):
+            st.session_state.viral_results=search_viral_shorts(viral_query, COUNTRY_CODES[country_name], CATEGORIES[cat_name], max_res)
+    results=st.session_state.get('viral_results',[])
+    if results:
+        patterns=analyze_winning_patterns(results)
+        gems=small_channel_gems(results); outs=channel_outliers(results)
+        st.success(f"{len(results)} kandidat dianalisis — fokus pada velocity, acceleration, ratio, engagement, dan breakout.")
+        top=results[0]
+        m1,m2,m3,m4,m5=st.columns(5)
+        m1.metric("🏆 Top Score", top.get('viral_score',0))
+        m2.metric("📈 VPH", f"{top.get('vph',0):,}")
+        m3.metric("⚡ Acceleration", f"{top.get('acceleration',1):.1f}x")
+        m4.metric("💎 Views/Subs", f"{top.get('ratio',0):.1f}x")
+        m5.metric("🎯 Shorts", f"{top.get('shorts_confidence',0)}%")
+        st.markdown("### 🚀 Breakout Detector")
+        breakouts=[x for x in results if x.get('breakout')]
+        if breakouts:
+            st.dataframe(pd.DataFrame([{'Title':x['title'],'Label':x['viral_label'],'Score':x['viral_score'],'VPH':x['vph'],'Acceleration':f"{x['acceleration']:.1f}x",'Views/Subs':f"{x['ratio']:.1f}x"} for x in breakouts[:15]]), use_container_width=True, hide_index=True)
+        else:
+            st.info("Belum ada kandidat breakout kuat pada snapshot ini. Ulangi scan beberapa waktu kemudian agar acceleration mulai terbaca.")
+        st.markdown("### 🏆 Winning Videos")
+        for i,v in enumerate(results[:20],1):
+            with st.container(border=True):
+                c1,c2,c3=st.columns([3,1,1])
+                with c1:
+                    st.markdown(f"**#{i} {v['viral_label']} — Score {v['viral_score']}**")
+                    st.write(v['title'])
+                    st.caption(f"👤 {v['channel']} • 👁️ {v['views_fmt']} • ⏱️ {v['duration']} • 🔥 {v['vph_fmt']} VPH")
+                with c2:
+                    st.metric("Acceleration", f"{v.get('acceleration',1):.1f}x")
+                    st.metric("Ratio", f"{v.get('ratio',0):.1f}x")
+                with c3:
+                    st.metric("ER", f"{v.get('er',0):.2f}%")
+                    st.link_button("▶ Watch", v['link'], use_container_width=True)
+        st.markdown("### 💎 Small Channel Gems")
+        if gems:
+            st.dataframe(pd.DataFrame([{'Title':x['title'],'Channel':x['channel'],'Subs':x['subs'],'Views':x['views_fmt'],'Ratio':f"{x['ratio']:.1f}x",'VPH':x['vph'],'Score':x['viral_score']} for x in gems[:15]]), use_container_width=True, hide_index=True)
+        else: st.info("Belum ada gem yang memenuhi threshold. Coba niche lebih spesifik atau ulangi scan setelah beberapa waktu.")
+        st.markdown("### 🎯 Outlier Detector")
+        if outs:
+            st.dataframe(pd.DataFrame([{'Title':x['title'],'Channel':x['channel'],'Views':x['views_fmt'],'Vs Channel Sample':f"{x['outlier_multiple']}x",'Score':x['viral_score']} for x in outs[:15]]), use_container_width=True, hide_index=True)
+        else: st.info("Belum ada outlier ≥3x dari baseline sample channel.")
+        st.markdown("### 🧬 Winning Pattern Detector")
+        p1,p2,p3=st.columns(3)
+        p1.metric("Top Winners",patterns.get('top_count',0)); p2.metric("Avg Duration",f"{patterns.get('avg_duration',0):.0f}s"); p3.metric("Avg Viral Score",patterns.get('avg_score',0))
+        st.write("**Keyword yang paling sering muncul:**", ", ".join(patterns.get('keywords',[])) or "—")
+        st.write("**Pola judul:**", ", ".join([f"{k} ({v})" for k,v in patterns.get('title_patterns',{}).most_common()]) or "—")
+        st.markdown("### 🧬 Winning Video DNA / Clone Search")
+        dna_idx=st.selectbox("Pilih video pemenang", range(min(10,len(results))), format_func=lambda i: results[i]['title'], key="dna_pick")
+        dna=results[dna_idx]
+        dna_terms=" ".join(extract_keywords(dna['title']+' '+dna.get('description',''))[:4])
+        st.code(f"Topic: {dna_terms}\nDuration: {dna.get('duration_seconds',0)}s\nVPH: {dna.get('vph',0):,}\nAcceleration: {dna.get('acceleration',1):.1f}x\nViews/Subs: {dna.get('ratio',0):.1f}x\nEngagement: {dna.get('er',0):.2f}%")
+        if st.button("🔍 Cari Video dengan DNA Serupa", key="dna_search"):
+            with st.spinner("Mencari pola serupa..."):
+                st.session_state.dna_results=search_viral_shorts(dna_terms or viral_query, COUNTRY_CODES[country_name], CATEGORIES[cat_name], 20)
+        if st.session_state.get('dna_results'):
+            st.dataframe(pd.DataFrame([{'Title':x['title'],'Score':x['viral_score'],'VPH':x['vph'],'Ratio':f"{x['ratio']:.1f}x",'Acceleration':f"{x['acceleration']:.1f}x"} for x in st.session_state.dna_results[:15]]), use_container_width=True, hide_index=True)
+        st.markdown("### 🤖 AI Winner Analysis")
+        if st.button("🧠 Analisis Kenapa Mereka Menang", key="ai_winner"):
+            with st.spinner("AI membaca pola dari winner, bukan menebak..."):
+                st.markdown(f"<div class='ai-box'>{generate_ai_winner_analysis(results, viral_query)}</div>", unsafe_allow_html=True)
+        st.download_button("💾 Export Viral Intelligence CSV", pd.DataFrame(results).to_csv(index=False), "viral_intelligence.csv", "text/csv", use_container_width=True)
 
 # --- MODE DIREKTORI CHANNEL ---
 elif mode == "🧭 Direktori Channel":
