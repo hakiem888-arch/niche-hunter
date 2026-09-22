@@ -989,50 +989,77 @@ def generate_ai_winner_analysis(results, query):
     except Exception as e: return f'❌ Gagal analisis AI: {e}'
 
 
-def get_artist_search_demand(artist, region_code='ID', freshness_days=7, max_results=25):
-    """YouTube audience-interest proxy. This is NOT official YouTube search volume."""
+def get_artist_search_demand(artist, region_code='ID', freshness_days=7, max_results=50):
+    """Low-quota YouTube audience-interest proxy.
+
+    Important: YouTube Data API does NOT expose official query search volume.
+    This function therefore measures search-result presence + recent content
+    activity/performance, not the number of people who searched the artist.
+
+    Quota strategy: one search.list + one videos.list per artist.
+    The previous implementation made three search.list calls per artist,
+    which could exhaust the daily quota very quickly.
+    """
     artist = (artist or '').strip()
     if not artist:
         return None
+
     published_after = get_published_after_rfc3339(freshness_days)
+    last_error = None
+
     for attempt in range(len(API_KEYS)):
         key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
         youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
         try:
+            params = {
+                'q': artist,
+                'part': 'snippet',
+                'type': 'video',
+                'order': 'relevance',
+                'maxResults': min(50, max(10, max_results)),
+            }
+            if region_code:
+                params['regionCode'] = region_code
+            if published_after:
+                params['publishedAfter'] = published_after
+
+            res = youtube.search().list(**params).execute()
+            items = res.get('items', [])
+            result_estimate = int(res.get('pageInfo', {}).get('totalResults', 0) or 0)
+
             ids = []
             discovery = {}
-            result_counts = []
-            for order in ['relevance', 'date', 'viewCount']:
-                params = {
-                    'q': artist,
-                    'part': 'snippet',
-                    'type': 'video',
-                    'order': order,
-                    'maxResults': min(50, max(10, max_results)),
-                }
-                if region_code:
-                    params['regionCode'] = region_code
-                if published_after:
-                    params['publishedAfter'] = published_after
-                res = youtube.search().list(**params).execute()
-                result_counts.append(res.get('pageInfo', {}).get('totalResults', 0))
-                for item in res.get('items', []):
-                    vid = item.get('id', {}).get('videoId')
-                    if vid:
-                        ids.append(vid)
-                        discovery[vid] = order
+            for item in items:
+                vid = item.get('id', {}).get('videoId')
+                if vid:
+                    ids.append(vid)
+                    discovery[vid] = 'relevance'
 
             ids = list(dict.fromkeys(ids))[:50]
             if not ids:
+                st.session_state.current_api_index = key_idx
                 return {
-                    'artist': artist, 'search_results_estimate': max(result_counts or [0]),
-                    'videos_found': 0, 'recent_videos': 0, 'total_views': 0,
-                    'avg_views': 0, 'median_views': 0, 'avg_vph': 0,
-                    'engagement_rate': 0, 'longform_count': 0, 'shorts_like_count': 0,
-                    'freshness_days': freshness_days, 'error': None
+                    'artist': artist,
+                    'search_results_estimate': result_estimate,
+                    'videos_found': 0,
+                    'recent_videos': 0,
+                    'total_views': 0,
+                    'avg_views': 0,
+                    'median_views': 0,
+                    'avg_vph': 0,
+                    'engagement_rate': 0,
+                    'longform_count': 0,
+                    'shorts_like_count': 0,
+                    'freshness_presence': 0,
+                    'freshness_days': freshness_days,
+                    'error': None,
                 }
 
-            stats = youtube.videos().list(id=','.join(ids), part='snippet,statistics,contentDetails').execute()
+            stats = youtube.videos().list(
+                id=','.join(ids),
+                part='snippet,statistics,contentDetails'
+            ).execute()
+
             videos = []
             now = datetime.utcnow()
             for v in stats.get('items', []):
@@ -1045,14 +1072,20 @@ def get_artist_search_demand(artist, region_code='ID', freshness_days=7, max_res
                     age_h = max((now - dt).total_seconds() / 3600, 0.1)
                 except Exception:
                     age_h = 999999
+
                 views = int(stt.get('viewCount', 0) or 0)
                 likes = int(stt.get('likeCount', 0) or 0)
                 comments = int(stt.get('commentCount', 0) or 0)
                 duration_s = parse_iso_duration(cd.get('duration', 'PT0S'))
                 videos.append({
-                    'id': v.get('id'), 'views': views, 'likes': likes, 'comments': comments,
-                    'age_h': age_h, 'duration_s': duration_s,
-                    'vph': views / max(age_h, 1), 'source': discovery.get(v.get('id'), 'relevance')
+                    'id': v.get('id'),
+                    'views': views,
+                    'likes': likes,
+                    'comments': comments,
+                    'age_h': age_h,
+                    'duration_s': duration_s,
+                    'vph': views / max(age_h, 1),
+                    'source': discovery.get(v.get('id'), 'relevance')
                 })
 
             views = [v['views'] for v in videos]
@@ -1062,14 +1095,13 @@ def get_artist_search_demand(artist, region_code='ID', freshness_days=7, max_res
             longform = [v for v in videos if v['duration_s'] >= 240 and v['duration_s'] > 0]
             shorts_like = [v for v in videos if 0 < v['duration_s'] <= 60]
 
-            # A transparent proxy: recent search-result presence + recent views + velocity + engagement.
-            # It intentionally avoids pretending that YouTube exposes exact query search counts.
             freshness_presence = len(recent) / max(len(videos), 1) * 100
             avg_views = statistics.mean(views) if views else 0
             median_views = statistics.median(views) if views else 0
             avg_vph = statistics.mean(vphs) if vphs else 0
             er = statistics.mean(engagements) if engagements else 0
-            result_estimate = max(result_counts or [0])
+
+            st.session_state.current_api_index = key_idx
             return {
                 'artist': artist,
                 'search_results_estimate': result_estimate,
@@ -1087,11 +1119,25 @@ def get_artist_search_demand(artist, region_code='ID', freshness_days=7, max_res
                 'error': None,
             }
         except Exception as e:
-            if 'quota' in str(e).lower() or '403' in str(e):
+            last_error = str(e)
+            low = last_error.lower()
+            if 'quota' in low or '403' in low or 'daily limit' in low or 'exceeded' in low:
                 continue
-            return {'artist': artist, 'error': str(e)}
-    return {'artist': artist, 'error': 'Semua API key gagal/kuota habis.'}
+            return {
+                'artist': artist,
+                'error': last_error,
+                'search_results_estimate': 0,
+                'videos_found': 0,
+                'recent_videos': 0,
+            }
 
+    return {
+        'artist': artist,
+        'error': last_error or 'Semua API key gagal/kuota habis.',
+        'search_results_estimate': 0,
+        'videos_found': 0,
+        'recent_videos': 0,
+    }
 
 def normalize_artist_comparison(rows):
     valid = [r for r in rows if not r.get('error')]
@@ -1153,6 +1199,10 @@ def render_artist_comparison():
     valid = [r for r in rows if not r.get('error')]
     if not valid:
         st.error('Tidak ada data yang berhasil diambil.')
+        st.markdown('### 🔧 Detail error per artis')
+        for r in rows:
+            st.warning(f"**{r.get('artist', 'Artis')}** → {r.get('error', 'Tidak ada hasil video pada window ini.')}")
+        st.info('Jika error menyebut quota/daily limit, tunggu reset quota YouTube atau gunakan API key lain. Fitur ini sekarang hanya memakai 1 search request + 1 stats request per artis agar jauh lebih hemat quota.')
         return
 
     st.markdown('### 📊 YouTube Search Demand Proxy')
