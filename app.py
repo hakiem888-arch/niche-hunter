@@ -1076,7 +1076,7 @@ def get_artist_search_demand(artist, region_code='ID', freshness_days=7, max_res
                 views = int(stt.get('viewCount', 0) or 0)
                 likes = int(stt.get('likeCount', 0) or 0)
                 comments = int(stt.get('commentCount', 0) or 0)
-                duration_s = parse_iso_duration(cd.get('duration', 'PT0S'))
+                duration_s = parse_iso_duration_seconds(cd.get('duration', 'PT0S'))
                 videos.append({
                     'id': v.get('id'),
                     'views': views,
