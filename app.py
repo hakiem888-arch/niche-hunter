@@ -988,6 +988,215 @@ def generate_ai_winner_analysis(results, query):
         return r.json()['candidates'][0]['content']['parts'][0]['text']
     except Exception as e: return f'❌ Gagal analisis AI: {e}'
 
+
+def get_artist_search_demand(artist, region_code='ID', freshness_days=7, max_results=25):
+    """YouTube audience-interest proxy. This is NOT official YouTube search volume."""
+    artist = (artist or '').strip()
+    if not artist:
+        return None
+    published_after = get_published_after_rfc3339(freshness_days)
+    for attempt in range(len(API_KEYS)):
+        key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
+        youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
+        try:
+            ids = []
+            discovery = {}
+            result_counts = []
+            for order in ['relevance', 'date', 'viewCount']:
+                params = {
+                    'q': artist,
+                    'part': 'snippet',
+                    'type': 'video',
+                    'order': order,
+                    'maxResults': min(50, max(10, max_results)),
+                }
+                if region_code:
+                    params['regionCode'] = region_code
+                if published_after:
+                    params['publishedAfter'] = published_after
+                res = youtube.search().list(**params).execute()
+                result_counts.append(res.get('pageInfo', {}).get('totalResults', 0))
+                for item in res.get('items', []):
+                    vid = item.get('id', {}).get('videoId')
+                    if vid:
+                        ids.append(vid)
+                        discovery[vid] = order
+
+            ids = list(dict.fromkeys(ids))[:50]
+            if not ids:
+                return {
+                    'artist': artist, 'search_results_estimate': max(result_counts or [0]),
+                    'videos_found': 0, 'recent_videos': 0, 'total_views': 0,
+                    'avg_views': 0, 'median_views': 0, 'avg_vph': 0,
+                    'engagement_rate': 0, 'longform_count': 0, 'shorts_like_count': 0,
+                    'freshness_days': freshness_days, 'error': None
+                }
+
+            stats = youtube.videos().list(id=','.join(ids), part='snippet,statistics,contentDetails').execute()
+            videos = []
+            now = datetime.utcnow()
+            for v in stats.get('items', []):
+                sn = v.get('snippet', {})
+                stt = v.get('statistics', {})
+                cd = v.get('contentDetails', {})
+                published = sn.get('publishedAt', '')
+                try:
+                    dt = parse_yt_date(published)
+                    age_h = max((now - dt).total_seconds() / 3600, 0.1)
+                except Exception:
+                    age_h = 999999
+                views = int(stt.get('viewCount', 0) or 0)
+                likes = int(stt.get('likeCount', 0) or 0)
+                comments = int(stt.get('commentCount', 0) or 0)
+                duration_s = parse_iso_duration(cd.get('duration', 'PT0S'))
+                videos.append({
+                    'id': v.get('id'), 'views': views, 'likes': likes, 'comments': comments,
+                    'age_h': age_h, 'duration_s': duration_s,
+                    'vph': views / max(age_h, 1), 'source': discovery.get(v.get('id'), 'relevance')
+                })
+
+            views = [v['views'] for v in videos]
+            vphs = [v['vph'] for v in videos]
+            engagements = [((v['likes'] + v['comments']) / max(v['views'], 1)) * 100 for v in videos]
+            recent = [v for v in videos if v['age_h'] <= 24 * min(freshness_days, 7)]
+            longform = [v for v in videos if v['duration_s'] >= 240 and v['duration_s'] > 0]
+            shorts_like = [v for v in videos if 0 < v['duration_s'] <= 60]
+
+            # A transparent proxy: recent search-result presence + recent views + velocity + engagement.
+            # It intentionally avoids pretending that YouTube exposes exact query search counts.
+            freshness_presence = len(recent) / max(len(videos), 1) * 100
+            avg_views = statistics.mean(views) if views else 0
+            median_views = statistics.median(views) if views else 0
+            avg_vph = statistics.mean(vphs) if vphs else 0
+            er = statistics.mean(engagements) if engagements else 0
+            result_estimate = max(result_counts or [0])
+            return {
+                'artist': artist,
+                'search_results_estimate': result_estimate,
+                'videos_found': len(videos),
+                'recent_videos': len(recent),
+                'total_views': sum(views),
+                'avg_views': avg_views,
+                'median_views': median_views,
+                'avg_vph': avg_vph,
+                'engagement_rate': er,
+                'longform_count': len(longform),
+                'shorts_like_count': len(shorts_like),
+                'freshness_presence': freshness_presence,
+                'freshness_days': freshness_days,
+                'error': None,
+            }
+        except Exception as e:
+            if 'quota' in str(e).lower() or '403' in str(e):
+                continue
+            return {'artist': artist, 'error': str(e)}
+    return {'artist': artist, 'error': 'Semua API key gagal/kuota habis.'}
+
+
+def normalize_artist_comparison(rows):
+    valid = [r for r in rows if not r.get('error')]
+    if not valid:
+        return rows
+    metrics = ['recent_videos', 'total_views', 'median_views', 'avg_vph', 'engagement_rate', 'longform_count']
+    for r in valid:
+        components = []
+        for key in metrics:
+            vals = [float(x.get(key, 0) or 0) for x in valid]
+            lo, hi = min(vals), max(vals)
+            value = float(r.get(key, 0) or 0)
+            if hi == lo:
+                score = 50.0
+            else:
+                score = (value - lo) / (hi - lo) * 100
+            components.append(score)
+        # Search-result estimate is deliberately shown as context, not treated as search volume.
+        r['youtube_interest_score'] = round(
+            components[0] * 0.20 + components[1] * 0.20 + components[2] * 0.15 +
+            components[3] * 0.20 + components[4] * 0.10 + components[5] * 0.15, 1
+        )
+    return sorted(rows, key=lambda x: x.get('youtube_interest_score', -1), reverse=True)
+
+
+def render_artist_comparison():
+    st.title('🎤 Artist Comparison — YouTube Audience Interest')
+    st.caption('Bandingkan beberapa artis menggunakan sinyal yang tersedia dari YouTube Data API.')
+    st.info('ℹ️ YouTube Data API tidak menyediakan angka resmi berapa kali nama artis dicari. Jadi aplikasi menampilkan **YouTube Search Demand Proxy** berdasarkan kehadiran di hasil pencarian, video terbaru, views, velocity, engagement, dan long-form activity. Angka ini bukan search volume resmi YouTube.')
+
+    with st.container(border=True):
+        a1, a2 = st.columns(2)
+        with a1:
+            artist_1 = st.text_input('Artis 1', placeholder='Contoh: Taylor Swift', key='artist_1')
+            artist_2 = st.text_input('Artis 2', placeholder='Contoh: Bruno Mars', key='artist_2')
+            artist_3 = st.text_input('Artis 3', placeholder='Contoh: Adele', key='artist_3')
+        with a2:
+            artist_4 = st.text_input('Artis 4 (opsional)', placeholder='Contoh: The Weeknd', key='artist_4')
+            artist_5 = st.text_input('Artis 5 (opsional)', placeholder='Contoh: Ed Sheeran', key='artist_5')
+            region_name = st.selectbox('Region YouTube', list(COUNTRY_CODES.keys()), index=1, key='artist_region')
+        freshness_label = st.selectbox('Window analisis', ['24 Jam', '3 Hari', '7 Hari', '30 Hari'], index=2, key='artist_freshness')
+        if st.button('🔎 Bandingkan Artis', type='primary', use_container_width=True):
+            artists = [x.strip() for x in [artist_1, artist_2, artist_3, artist_4, artist_5] if x.strip()]
+            if len(artists) < 2:
+                st.warning('Masukkan minimal 2 artis untuk dibandingkan.')
+            else:
+                days_map = {'24 Jam': 1, '3 Hari': 3, '7 Hari': 7, '30 Hari': 30}
+                days = days_map[freshness_label]
+                with st.spinner('Mengumpulkan sinyal pencarian dan performa YouTube...'):
+                    rows = [get_artist_search_demand(a, COUNTRY_CODES[region_name], days, 25) for a in artists]
+                st.session_state.artist_compare_results = normalize_artist_comparison(rows)
+                st.session_state.artist_compare_window = freshness_label
+
+    rows = st.session_state.get('artist_compare_results', [])
+    if not rows:
+        st.info('Masukkan minimal 2 artis lalu jalankan perbandingan.')
+        return
+
+    valid = [r for r in rows if not r.get('error')]
+    if not valid:
+        st.error('Tidak ada data yang berhasil diambil.')
+        return
+
+    st.markdown('### 📊 YouTube Search Demand Proxy')
+    cols = st.columns(len(valid))
+    for i, r in enumerate(valid):
+        with cols[i]:
+            st.metric(r['artist'], f"{r.get('youtube_interest_score', 0):.1f}/100")
+            st.caption(f"{r.get('videos_found', 0)} video ditemukan • {r.get('recent_videos', 0)} video fresh")
+
+    df = pd.DataFrame([{
+        'Artist': r['artist'],
+        'Interest Proxy': r.get('youtube_interest_score', 0),
+        'Search Results (estimate)': r.get('search_results_estimate', 0),
+        'Videos Found': r.get('videos_found', 0),
+        'Fresh Videos': r.get('recent_videos', 0),
+        'Total Views': int(r.get('total_views', 0)),
+        'Median Views': int(r.get('median_views', 0)),
+        'Avg VPH': int(r.get('avg_vph', 0)),
+        'Engagement %': round(r.get('engagement_rate', 0), 2),
+        'Long-form': r.get('longform_count', 0),
+        'Shorts-like': r.get('shorts_like_count', 0),
+    } for r in valid])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    st.markdown('### 🔥 Visual Comparison')
+    chart_df = df.set_index('Artist')[['Interest Proxy', 'Avg VPH', 'Fresh Videos']]
+    st.bar_chart(chart_df, use_container_width=True)
+
+    st.markdown('### 🔎 Cara Membaca Data')
+    st.markdown('''
+- **Interest Proxy**: indikator relatif untuk membandingkan artis dalam scan yang sama, bukan jumlah pencarian.
+- **Search Results (estimate)**: estimasi jumlah hasil yang dikembalikan mesin pencarian YouTube untuk query; ini **bukan** jumlah orang yang mencari.
+- **Fresh Videos**: banyaknya video dalam sampel yang masih berada di window analisis.
+- **Avg VPH**: rata-rata views per jam dari video sampel.
+- **Median Views**: median views, lebih tahan terhadap satu video yang sangat besar.
+- **Long-form / Shorts-like**: gambaran bentuk konten yang muncul dalam sampel.
+''')
+
+    st.markdown('### 💡 Catatan')
+    st.caption('Untuk angka search interest yang benar-benar berasal dari data pencarian, gunakan Google Trends sebagai sumber terpisah. Google Trends juga memberikan indeks relatif, bukan jumlah pencarian absolut.')
+
+    st.download_button('💾 Export Artist Comparison CSV', df.to_csv(index=False), 'artist_comparison.csv', 'text/csv', use_container_width=True)
+
+
 # --- CALLBACK FUNCTIONS (AMAN) ---
 def goto_analyzer(channel_id):
     st.session_state.stalk_channel = channel_id
@@ -1024,6 +1233,8 @@ if 'compare_list' not in st.session_state: st.session_state.compare_list = []
 if 'run_dir_search' not in st.session_state: st.session_state.run_dir_search = False
 if 'viral_results' not in st.session_state: st.session_state.viral_results = []
 if 'dna_results' not in st.session_state: st.session_state.dna_results = []
+if 'artist_compare_results' not in st.session_state: st.session_state.artist_compare_results = []
+if 'artist_compare_window' not in st.session_state: st.session_state.artist_compare_window = '7 Hari'
 
 with st.sidebar:
     st.title("🎛️ Menu Navigasi")
@@ -1034,7 +1245,8 @@ with st.sidebar:
         "⚡ Viral Intelligence",
         "🧭 Direktori Channel", 
         "🕵️ Analisis Channel", 
-        "⚖️ Bandingkan Channel"
+        "⚖️ Bandingkan Channel",
+        "🎤 Bandingkan Artis"
     ], key="app_mode")
     st.markdown("---")
     
@@ -1544,6 +1756,9 @@ elif mode == "🕵️ Analisis Channel":
                     st.caption(f"📅 {vid['date']}")
                     st.markdown(f"**👁️ {vid['views']} Views**")
                     st.markdown(f"<span style='font-size:12px; opacity:0.8;'>{vid['title']}</span>", unsafe_allow_html=True)
+
+elif mode == "🎤 Bandingkan Artis":
+    render_artist_comparison()
 
 elif mode == "⚖️ Bandingkan Channel":
     st.title("⚖️ Perbandingan Channel (Head-to-Head)")
