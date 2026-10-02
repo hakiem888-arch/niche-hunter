@@ -1401,6 +1401,22 @@ with st.sidebar:
             st.session_state.compare_list = []
             st.rerun()
 
+
+
+# ==========================================
+# AI COMPETITOR INTELLIGENCE HELPER
+# ==========================================
+
+def run_competitor_ai(channel_a, channel_b):
+    data_a = {
+        "channel": channel_a
+    }
+    data_b = {
+        "channel": channel_b
+    }
+
+    return competitor_insight(data_a, data_b)
+
 # ==========================================
 # 6. LOGIKA HALAMAN UTAMA
 # ==========================================
