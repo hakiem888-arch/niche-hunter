@@ -13,9 +13,6 @@ import matplotlib.pyplot as plt
 from collections import Counter
 from pytrends.request import TrendReq
 from dateutil.relativedelta import relativedelta
-from modules.ai_engine import groq_analyze, video_insight
-from modules.opportunity_engine import opportunity_score
-
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN
@@ -1288,8 +1285,6 @@ if 'viral_results' not in st.session_state: st.session_state.viral_results = []
 if 'dna_results' not in st.session_state: st.session_state.dna_results = []
 if 'artist_compare_results' not in st.session_state: st.session_state.artist_compare_results = []
 if 'artist_compare_window' not in st.session_state: st.session_state.artist_compare_window = '7 Hari'
-if 'ai_context' not in st.session_state: st.session_state.ai_context = ""
-
 
 with st.sidebar:
     st.title("🎛️ Menu Navigasi")
@@ -1301,8 +1296,7 @@ with st.sidebar:
         "🧭 Direktori Channel", 
         "🕵️ Analisis Channel", 
         "⚖️ Bandingkan Channel",
-        "🎤 Bandingkan Artis",
-        "🤖 Diffic AI Strategist"
+        "🎤 Bandingkan Artis"
     ], key="app_mode")
     st.markdown("---")
     
@@ -1383,99 +1377,6 @@ with st.sidebar:
         if st.button("🗑️ Bersihkan Daftar", use_container_width=True):
             st.session_state.compare_list = []
             st.rerun()
-
-
-
-# ==========================================
-# 5B. DIFFIC AI STRATEGIST
-# ==========================================
-
-if mode == "🤖 Diffic AI Strategist":
-    st.title("🤖 Diffic AI YouTube Strategist")
-
-    st.info(
-        "AI layer yang membaca data riset YouTube dan membantu "
-        "menentukan peluang konten."
-    )
-
-    tab1, tab2, tab3 = st.tabs([
-        "AI Assistant",
-        "Opportunity Score",
-        "Content Strategy"
-    ])
-
-    with tab1:
-        context = st.text_area(
-            "Masukkan data video/channel",
-            placeholder="Judul, views, VPH, SEO, channel, tags..."
-        )
-
-        question = st.text_input(
-            "Pertanyaan AI",
-            "Mengapa video ini berpotensi berhasil?"
-        )
-
-        if st.button("🚀 Analisis AI"):
-            result = groq_analyze(
-                f"""
-Anda adalah YouTube strategist.
-
-Data:
-{context}
-
-Pertanyaan:
-{question}
-
-Berikan:
-1. Analisis performa
-2. Faktor kemenangan
-3. Risiko
-4. Rekomendasi konten
-"""
-            )
-            st.markdown(result)
-
-    with tab2:
-        st.subheader("🔥 Diffic Opportunity Score")
-
-        views = st.number_input("Views", value=100000)
-        vph = st.number_input("Views Per Hour", value=5000)
-        seo = st.slider("SEO Score", 0, 100, 80)
-
-        score = opportunity_score({
-            "views": views,
-            "vph": vph,
-            "seo_score": seo
-        })
-
-        st.metric(
-            "Opportunity Score",
-            f"{score}/100"
-        )
-
-    with tab3:
-        niche = st.text_input(
-            "Niche",
-            "AI Tools"
-        )
-
-        if st.button("✨ Generate Strategy"):
-            st.markdown(
-                groq_analyze(
-                    f"""
-Buat strategi konten YouTube untuk niche:
-{niche}
-
-Berikan:
-- 5 ide judul
-- hook
-- konsep thumbnail
-- target audience
-"""
-                )
-            )
-
-    st.stop()
 
 # ==========================================
 # 6. LOGIKA HALAMAN UTAMA
@@ -1576,6 +1477,22 @@ if mode in ["🔍 Pencarian Video", "🔥 Trending (Viral)"]:
                     c_btn1, c_btn2 = st.columns(2)
                     with c_btn1:
                         st.button("🕵️ Bedah", key=f"stalk_{vid['id']}", on_click=goto_analyzer, args=(vid['channel_id'],), use_container_width=True)
+
+                    if st.button("🧬 Channel DNA", key=f"dna_{vid['id']}", use_container_width=True):
+                        with st.spinner("AI menganalisis DNA channel..."):
+                            channel_data = {
+                                "channel_id": vid.get("channel_id",""),
+                                "channel": vid.get("channel",""),
+                                "title": vid.get("title",""),
+                                "views": vid.get("views_fmt",""),
+                                "tags": vid.get("tags","")
+                            }
+                            st.session_state["channel_dna_result"] = channel_insight(channel_data)
+
+                    if st.session_state.get("channel_dna_result"):
+                        with st.expander("🧬 AI Channel DNA", expanded=True):
+                            st.write(st.session_state["channel_dna_result"])
+
                     with c_btn2:
                         st.button("⚖️ +Banding", key=f"comp_{vid['id']}", on_click=add_to_compare_and_go, args=(vid['channel_id'],), use_container_width=True)
 
