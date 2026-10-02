@@ -13,6 +13,29 @@ import matplotlib.pyplot as plt
 from collections import Counter
 from pytrends.request import TrendReq
 from dateutil.relativedelta import relativedelta
+import streamlit as st
+from googleapiclient.discovery import build
+from datetime import datetime, timedelta, timezone
+import pandas as pd
+import requests
+import re
+import urllib.parse
+import json
+import sqlite3
+import math
+import statistics
+import matplotlib.pyplot as plt
+from collections import Counter
+from pytrends.request import TrendReq
+from dateutil.relativedelta import relativedelta
+
+from modules.ai_engine import (
+    groq_analyze,
+    video_insight,
+    channel_insight,
+    competitor_insight,
+    content_strategy
+)
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN
