@@ -1,5 +1,5 @@
 import streamlit as st
-from googleapiclient.discovery import build
+from modules.youtube_client import build
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import requests
@@ -12,6 +12,7 @@ import statistics
 import os
 from pathlib import Path
 from modules.growth_engine import metadata_check
+from modules.intelligence import comparable_baseline, lifetime_vph, balanced_ids
 import matplotlib.pyplot as plt
 from collections import Counter
 from pytrends.request import TrendReq
@@ -34,6 +35,7 @@ try:
     raw_keys = st.secrets.get("YOUTUBE_API_KEYS", st.secrets.get("YOUTUBE_API_KEY", ""))
 except FileNotFoundError:
     raw_keys = ""
+raw_keys = raw_keys or os.environ.get('YOUTUBE_API_KEYS', os.environ.get('YOUTUBE_API_KEY', ''))
 if isinstance(raw_keys, (list, tuple)):
     raw_keys = ",".join(str(k) for k in raw_keys)
 else:
@@ -47,11 +49,14 @@ if not API_KEYS:
 
 if 'current_api_index' not in st.session_state:
     st.session_state.current_api_index = 0
+if API_KEYS:
+    st.session_state.current_api_index %= len(API_KEYS)
 
 try:
     GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 except FileNotFoundError:
     GEMINI_API_KEY = ""
+GEMINI_API_KEY = GEMINI_API_KEY or os.environ.get('GEMINI_API_KEY', '')
 
 # ==========================================
 # 2. DATA REFERENSI
@@ -93,11 +98,9 @@ CARD_COLORS = ["#f43f5e", "#fbbf24", "#10b981", "#0ea5e9", "#8b5cf6"]
 # ==========================================
 
 def parse_yt_date(date_str):
-    try:
-        clean_date = re.sub(r'\.\d+', '', date_str)
-        return datetime.strptime(clean_date, "%Y-%m-%dT%H:%M:%SZ")
-    except Exception:
-        return datetime.utcnow()
+    parsed = datetime.fromisoformat(str(date_str).replace('Z', '+00:00'))
+    if parsed.tzinfo is None: parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).replace(tzinfo=None)
 
 def format_number(num):
     if num >= 1000000: return f"{num/1000000:.1f}M"
@@ -116,19 +119,16 @@ def calculate_channel_age(published_at):
     except: return "N/A"
 
 def fetch_channel_recent_avg_views(youtube, channel_id):
-    try:
-        res = youtube.search().list(channelId=channel_id, part='id', type='video', order='date', maxResults=5).execute()
-        vid_ids = [item['id']['videoId'] for item in res.get('items', []) if 'videoId' in item['id']]
-        if not vid_ids: return "0"
-        stats = youtube.videos().list(id=','.join(vid_ids), part='statistics').execute()
-        total_views = sum([int(item['statistics'].get('viewCount', 0)) for item in stats.get('items', [])])
-        return format_number(total_views / len(vid_ids) if vid_ids else 0)
-    except Exception as e:
-        if "quota" in str(e).lower() or "403" in str(e): raise e
-        return "N/A"
+    items = youtube.recent_uploads(channel_id, 15)
+    samples = [{'raw_views': int(v.get('statistics',{}).get('viewCount',0)),
+                'published_full': v.get('snippet',{}).get('publishedAt','')} for v in items]
+    rates = [r for v in samples if (r := lifetime_vph(v)) is not None]
+    return {'average_views': statistics.mean([v['raw_views'] for v in samples]) if samples else 0,
+            'median_vph': statistics.median(rates) if rates else 0}
+
 
 def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Teratas)", subs_filter="Semua", age_filter="Semua", vph_filter="Semua"):
-    for attempt in range(len(API_KEYS)):
+    for attempt in range(min(1, len(API_KEYS))):
         key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
         youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
         try:
@@ -173,8 +173,9 @@ def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Ter
                 avg_views_val = "0"
                 avg_vph_val = 0
                 if vph_filter != "Semua" or sort_by == "Tumbuh Tercepat":
-                    avg_views_val = fetch_channel_recent_avg_views(youtube, item['id'])
-                    avg_vph_val = int(avg_views_val.replace('K','000').replace('M','000000').replace('.','')) / 24 if 'M' in avg_views_val or 'K' in avg_views_val else 0
+                    recent = fetch_channel_recent_avg_views(youtube, item['id'])
+                    avg_views_val = format_number(recent['average_views'])
+                    avg_vph_val = recent['median_vph']
                 
                     if vph_filter == "> 100" and avg_vph_val <= 100: continue
                     elif vph_filter == "> 500" and avg_vph_val <= 500: continue
@@ -221,13 +222,13 @@ def search_youtube_channels(query, max_results=20, sort_by="Banyak Ditonton (Ter
                 st.error(f"❌ Terjadi kesalahan API YouTube. Detail: {str(e)}")
                 return []
             
-    st.error("❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN! Silakan tunggu besok atau tambahkan API Key baru di setting.")
+    st.error("Permintaan YouTube belum berhasil. Periksa kunci, izin API, atau kuota proyek. Kunci tidak diganti otomatis.")
     return []
 
 def get_youtube_suggestions(query):
     if not query or len(query) < 2: return []
     try:
-        url = f"http://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={urllib.parse.quote(query)}"
+        url = f"https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={urllib.parse.quote(query)}"
         response = requests.get(url, timeout=3)
         if response.status_code == 200: return json.loads(response.text)[1][:10]
         return []
@@ -259,18 +260,18 @@ def get_rising_trends(query, geo='ID'):
 
 def generate_ai_ideas(niche_query):
     if not GEMINI_API_KEY: return "⚠️ **Error:** GEMINI_API_KEY belum diisi di Streamlit Secrets."
-    prompt = f"""Kamu pakar YouTube SEO dari vidIQ. Buat 5 ide video viral untuk niche: "{niche_query}". 
+    prompt = f"""Anda editor ide YouTube independen. Buat 5 usulan ide video untuk niche: "{niche_query}". Jangan menjanjikan viral, mengaku mewakili vidIQ, atau mengarang data permintaan.
     Format wajib: 
     ### Ide [Nomor]
     * **💡 Judul Video:** (Clickbait jujur)
     * **🖼️ Konsep Thumbnail:** (Elemen visual, teks, warna kontras)
     * **🔥 Alasan Menang:** (Kenapa disukai algoritma & penonton)"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     try:
-        response = requests.post(url, headers={'Content-Type': 'application/json'}, json={"contents": [{"parts": [{"text": prompt}]}]})
+        response = requests.post(url, headers={'Content-Type': 'application/json','x-goog-api-key':GEMINI_API_KEY}, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=45)
         response.raise_for_status()
         return response.json()['candidates'][0]['content']['parts'][0]['text']
-    except Exception as e: return f"❌ Gagal memanggil AI. Detail: {str(e)}"
+    except Exception: return "Layanan AI belum tersedia. Periksa konfigurasi atau coba lagi nanti."
 
 def calculate_vph(published_at_str, current_views):
     try:
@@ -418,51 +419,21 @@ def median_safe(values, default=0):
     return statistics.median(vals) if vals else default
 
 
-def fetch_channel_baselines(youtube, channel_ids, max_videos=8, max_channels=20):
-    """Build a channel-normal baseline from recent uploads.
-    Capped to the strongest discovered channels to protect YouTube API quota.
-    Results are cached in Streamlit session for the current run/session.
-    """
-    cache = st.session_state.setdefault('viral_baseline_cache', {})
+def fetch_channel_baselines(youtube, channel_ids, max_videos=50, max_channels=20):
+    """Use upload playlists, not search quota, and retain evidence for comparable cohorts."""
     baselines = {}
-    unique_ids = list(dict.fromkeys([x for x in channel_ids if x]))[:max_channels]
-    for channel_id in unique_ids:
-        cached = cache.get(channel_id)
-        if cached and (datetime.utcnow() - cached['captured_at']).total_seconds() < 1800:
-            baselines[channel_id] = cached['data']
-            continue
-        try:
-            search_res = youtube.search().list(
-                channelId=channel_id, part='id,snippet', type='video', order='date',
-                maxResults=min(10, max_videos)
-            ).execute()
-            ids = [x['id']['videoId'] for x in search_res.get('items', []) if x.get('id', {}).get('videoId')]
-            if not ids:
-                continue
-            stats_res = youtube.videos().list(id=','.join(ids), part='snippet,statistics').execute()
-            views_list, vph_list = [], []
-            for item in stats_res.get('items', []):
-                stt = item.get('statistics', {})
-                sn = item.get('snippet', {})
-                views = int(stt.get('viewCount', 0))
-                published = sn.get('publishedAt', '')
-                if not published:
-                    continue
-                age_hours = max((datetime.utcnow() - parse_yt_date(published)).total_seconds() / 3600, 1)
-                views_list.append(views); vph_list.append(views / age_hours)
-            if views_list:
-                data = {
-                    'sample_size': len(views_list),
-                    'median_views': median_safe(views_list),
-                    'median_vph': median_safe(vph_list),
-                    'avg_views': sum(views_list) / len(views_list),
-                }
-                cache[channel_id] = {'captured_at': datetime.utcnow(), 'data': data}
-                baselines[channel_id] = data
-        except Exception as e:
-            if 'quota' in str(e).lower() or '403' in str(e): raise
-            continue
+    for channel_id in list(dict.fromkeys(x for x in channel_ids if x))[:max_channels]:
+        items = youtube.recent_uploads(channel_id, max_videos)
+        rows = []
+        for item in items:
+            snippet = item.get('snippet', {})
+            rows.append({'id':item['id'], 'channel_id':channel_id,
+                         'published_full':snippet.get('publishedAt',''),
+                         'raw_views':int(item.get('statistics',{}).get('viewCount',0)),
+                         'duration_seconds':parse_iso_duration_seconds(item.get('contentDetails',{}).get('duration',''))})
+        baselines[channel_id] = {'videos':rows}
     return baselines
+
 
 
 
@@ -480,6 +451,7 @@ def get_channel_subs(youtube, channel_ids):
             result.update({
                 item['id']: int(item['statistics'].get('subscriberCount', 0))
                 for item in res.get('items', [])
+                if not item.get('statistics',{}).get('hiddenSubscriberCount',False) and 'subscriberCount' in item.get('statistics',{})
             })
         return result
     except Exception as e:
@@ -499,7 +471,7 @@ def extract_keywords(text):
 
 def analyze_channel_deep(channel_id):
     sample_limit = int(st.session_state.get("channel_sample_size", 5))
-    for attempt in range(len(API_KEYS)):
+    for attempt in range(min(1, len(API_KEYS))):
         key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
         youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
         try:
@@ -564,7 +536,7 @@ def analyze_channel_deep(channel_id):
             else:
                 st.error(f"❌ Gagal membedah channel. Detail: {str(e)}")
                 return None
-    st.error("❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!")
+    st.error("Permintaan YouTube belum berhasil. Periksa kunci, izin API, atau kuota proyek.")
     return None
 
 def process_video_response(items, youtube, region_code):
@@ -586,7 +558,7 @@ def process_video_response(items, youtube, region_code):
             best_thumb = thumbnails.get('maxres') or thumbnails.get('high') or thumbnails.get('medium') or thumbnails.get('default') or {}
             
             desc = snippet.get('description', '')
-            tags = snippet.get('tags', [])[:10]
+            tags = snippet.get('tags', [])
             seo_score, seo_checks = calculate_seo_score(snippet.get('title', ''), desc, tags)
             video_id = item['id'] if isinstance(item['id'], str) else item['id'].get('videoId', '')
 
@@ -603,13 +575,14 @@ def process_video_response(items, youtube, region_code):
                 'earnings': estimate_earnings(views, region_code), 'er': calculate_er(views, likes, comments), 
                 'subs': format_number(subs), 'ratio': (views/subs if subs > 0 else 0), 'ratio_label': f"{(views/subs if subs>0 else 0):.1f}x", 
                 'is_gem': (views/subs if subs > 0 else 0) > 1.5, 'tags': tags, 'seo_score': seo_score, 'seo_checks': seo_checks,
+                'subscriber_known': snippet.get('channelId', '') in subs_map,
                 'link': f"https://youtu.be/{video_id}"
             })
         except: continue 
     return results
 
 def search_youtube(query, region_code='ID', duration='any', category_id=None, published_after=None, license_type=None, sort_order='relevance', max_results=12):
-    for attempt in range(len(API_KEYS)):
+    for attempt in range(min(1, len(API_KEYS))):
         key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
         youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
         try:
@@ -627,7 +600,8 @@ def search_youtube(query, region_code='ID', duration='any', category_id=None, pu
             if not vid_ids: return []
 
             stats_res = youtube.videos().list(part='snippet,statistics,contentDetails', id=','.join(vid_ids)).execute()
-            results = process_video_response(stats_res.get('items', []), youtube, region_code)
+            items_by_id = {item['id']:item for item in stats_res.get('items', [])}
+            results = process_video_response([items_by_id[vid] for vid in vid_ids if vid in items_by_id], youtube, region_code)
             
             if sort_order == 'vph_custom': return sorted(results, key=lambda x: x['vph'], reverse=True)
             elif sort_order == 'ratio_custom': return sorted(results, key=lambda x: x['ratio'], reverse=True)
@@ -641,11 +615,11 @@ def search_youtube(query, region_code='ID', duration='any', category_id=None, pu
             else:
                 st.error(f"❌ Terjadi kesalahan API YouTube. Detail: {e}")
                 return []
-    st.error("❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!")
+    st.error("Permintaan YouTube belum berhasil. Periksa kunci, izin API, atau kuota proyek.")
     return []
 
 def get_trending_videos(region_code='ID', category_id=None, max_results=12):
-    for attempt in range(len(API_KEYS)):
+    for attempt in range(min(1, len(API_KEYS))):
         key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
         youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
         try:
@@ -661,7 +635,7 @@ def get_trending_videos(region_code='ID', category_id=None, max_results=12):
             else:
                 st.error(f"❌ Error API: {e}")
                 return []
-    st.error("❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!")
+    st.error("Permintaan YouTube belum berhasil. Periksa kunci, izin API, atau kuota proyek.")
     return []
 
 
@@ -676,12 +650,13 @@ def search_viral_longform(query, region_code='ID', category_id=None, max_results
     """V2 discovery: fresh + high-performing long-form candidates.
     YouTube API duration buckets are split into medium (4-20m) and long (>20m).
     """
-    for attempt in range(len(API_KEYS)):
+    for attempt in range(min(1, len(API_KEYS))):
         key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
         youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
         try:
             published_after = get_published_after_rfc3339(freshness_days)
             collected = []
+            discovery_groups = []
             discovery_source = {}
             # Fresh discovery catches new uploads that have not accumulated huge lifetime views.
             # Breakout discovery catches videos already gaining unusual view volume.
@@ -696,14 +671,17 @@ def search_viral_longform(query, region_code='ID', category_id=None, max_results
                     if category_id: params['videoCategoryId'] = category_id
                     if published_after: params['publishedAfter'] = published_after
                     res = youtube.search().list(**params).execute()
+                    group = []
+                    discovery_groups.append(group)
                     for x in res.get('items', []):
                         vid = x.get('id', {}).get('videoId')
                         if vid:
                             collected.append(vid)
+                            group.append(vid)
                             source_name = 'Fresh Uploads' if order == 'date' else 'Recent High-Views'
                             discovery_source[vid] = source_name
 
-            ids = list(dict.fromkeys(collected))[:50]
+            ids = balanced_ids(discovery_groups, 50)
             if not ids:
                 return []
 
@@ -729,7 +707,7 @@ def search_viral_longform(query, region_code='ID', category_id=None, max_results
             # Channel baseline requires extra calls, so do it only for discovered channels.
             baseline_candidates = sorted(candidates, key=lambda x: x.get('vph', 0), reverse=True)[:20]
             channel_ids = [v.get('channel_id') for v in baseline_candidates if v.get('channel_id')]
-            baselines = fetch_channel_baselines(youtube, channel_ids, max_videos=8, max_channels=20)
+            baselines = fetch_channel_baselines(youtube, channel_ids, max_videos=50, max_channels=20)
             for v in candidates:
                 v['discovery_source'] = discovery_source.get(v.get('id'), 'Recent Candidate')
             enrich_viral_longform(candidates, query, baselines)
@@ -741,7 +719,7 @@ def search_viral_longform(query, region_code='ID', category_id=None, max_results
                 continue
             st.error(f'❌ Viral Intelligence V2 API error: {e}')
             return []
-    st.error('❌ SEMUA API KEY TELAH KEHABISAN KUOTA HARIAN!')
+    st.error('Permintaan YouTube belum berhasil. Periksa kunci, izin API, atau kuota proyek.')
     return []
 
 
@@ -763,6 +741,9 @@ def calculate_breakout_score(v):
     if v.get('snapshot_count', 0) < 2:
         components['Akselerasi'] = (0, .20)
         acceleration_score = 0
+    if v.get('channel_baseline_samples', 0) < 3 or baseline_multiple <= 0:
+        components['Perbandingan baseline'] = (0, .15)
+        baseline_score = 0
     v['score_components'] = [{'Komponen': k, 'Nilai': round(value,1), 'Bobot': weight, 'Kontribusi': round(value*weight,1)} for k,(value,weight) in components.items()]
     v['score_evidence'] = 'Terbatas' if v.get('snapshot_count',0) < 2 or v.get('channel_baseline_samples',0) < 3 else 'Snapshot dan baseline tersedia'
     score = (
@@ -805,30 +786,29 @@ def enrich_viral_longform(results, query='', baselines=None):
         v['acceleration'] = round(acceleration, 2)
         v['snapshot_count'] = snapshot_count
 
-        baseline = baselines.get(v.get('channel_id'), {})
-        baseline_views = float(baseline.get('median_views', 0))
-        baseline_vph = float(baseline.get('median_vph', 0))
+        baseline = comparable_baseline(v, baselines.get(v.get('channel_id'), {}).get('videos', []), now)
+        baseline_views = float(baseline.get('median_views') or 0)
+        baseline_vph = float(baseline.get('median_vph') or 0)
         v['channel_baseline_views'] = int(baseline_views)
         v['channel_baseline_vph'] = int(baseline_vph)
         v['channel_baseline_samples'] = int(baseline.get('sample_size', 0))
-        velocity_multiple = velocity / baseline_vph if baseline_vph > 0 else 0
+        velocity_multiple = baseline.get('multiple') or 0
         views_multiple = v.get('raw_views', 0) / baseline_views if baseline_views > 0 else 0
         v['velocity_baseline_multiple'] = round(velocity_multiple, 2)
         v['views_baseline_multiple'] = round(views_multiple, 2)
-        if velocity_multiple > 0 and views_multiple > 0:
-            v['channel_breakout_multiple'] = round(0.7 * velocity_multiple + 0.3 * views_multiple, 2)
-        else:
-            v['channel_breakout_multiple'] = round(max(velocity_multiple, views_multiple), 2)
+        v['channel_breakout_multiple'] = round(velocity_multiple, 2)
+        v['baseline_basis'] = baseline['basis']
+        v['lifetime_vph'] = round(lifetime_vph(v, now) or 0, 2)
 
         title_words = set(re.findall(r'\w+', (v.get('title', '') + ' ' + v.get('description', '')).lower()))
-        v['query_relevance'] = min(100, 40 + 20 * len(q_words & title_words)) if q_words else 70
+        v['query_relevance'] = 100 * len(q_words & title_words) / len(q_words) if q_words else 0
         v['breakout_score'] = calculate_breakout_score(v)
         v['viral_score'] = v['breakout_score']  # backwards-compatible export
         v['viral_label'] = breakout_label(v['breakout_score'])
         v['breakout'] = v['breakout_score'] >= 70
 
         reasons = []
-        if velocity_multiple >= 5: reasons.append(f"{velocity_multiple:.1f}x di atas velocity normal channel")
+        if velocity_multiple >= 5: reasons.append(f"VPH sejak publikasi {velocity_multiple:.1f}x median video sebanding")
         elif velocity > 0 and baseline_vph <= 0: reasons.append("channel baseline belum cukup terbentuk")
         if acceleration >= 2: reasons.append(f"velocity naik {acceleration:.1f}x")
         if v.get('ratio', 0) >= 2: reasons.append(f"views {v['ratio']:.1f}x subscriber")
@@ -867,21 +847,18 @@ def analyze_winning_patterns(results):
 
 
 def channel_outliers(results):
-    groups = {}
-    for v in results: groups.setdefault(v.get('channel_id'), []).append(v)
     out = []
-    for cid, vids in groups.items():
-        avg = sum(x.get('views', 0) for x in vids) / len(vids)
-        for v in vids:
-            ratio = v.get('views', 0) / max(avg, 1)
-            if ratio >= 3: out.append({**v, 'outlier_multiple': round(ratio, 1)})
+    for v in results:
+        baseline = comparable_baseline(v, results)
+        if (baseline['multiple'] or 0) >= 3:
+            out.append({**v, 'outlier_multiple': round(baseline['multiple'], 1)})
     return sorted(out, key=lambda x: x['outlier_multiple'], reverse=True)
 
 
 def small_channel_gems(results):
     return sorted([
         v for v in results
-        if int(v.get('raw_subs', 0)) <= 100000 and v.get('channel_breakout_multiple', 0) >= 3
+        if v.get('subscriber_known', True) and 0 < int(v.get('raw_subs', 0)) <= 100000 and v.get('channel_breakout_multiple', 0) >= 3
         and v.get('breakout_score', 0) >= 55
     ], key=lambda x: x.get('breakout_score', 0), reverse=True)
 
@@ -896,6 +873,8 @@ def radar_chart(video):
         normalize_score(video.get('er', 0), 0, 10),
         max(0, min(100, 100 - (video.get('age_hours', 999) / 168) * 100)),
     ]
+    if video.get('snapshot_count',0)<2: values[1]=0
+    if video.get('channel_baseline_samples',0)<3: values[2]=0
     angles = [i * 2 * math.pi / len(labels) for i in range(len(labels))]
     values += values[:1]; angles += angles[:1]
     fig, ax = plt.subplots(figsize=(5, 5), subplot_kw=dict(polar=True))
@@ -939,9 +918,9 @@ def generate_ai_content_opportunity(video, query):
     prompt = f"""Buat content opportunity dari video YouTube yang sedang breakout. Jangan menyalin video.
 Data: {json.dumps(compact, ensure_ascii=False)}
 Berikan singkat: 1) topic gap, 2) hook original, 3) angle berbeda, 4) title formula, 5) thumbnail concept, 6) recommended duration, 7) why-now. Jangan mengarang fakta di luar data."""
-    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}'
+    url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
     try:
-        r = requests.post(url, headers={'Content-Type': 'application/json'}, json={'contents': [{'parts': [{'text': prompt}]}]}, timeout=60)
+        r = requests.post(url, headers={'Content-Type': 'application/json','x-goog-api-key':GEMINI_API_KEY}, json={'contents': [{'parts': [{'text': prompt}]}]}, timeout=60)
         r.raise_for_status()
         return r.json()['candidates'][0]['content']['parts'][0]['text']
     except Exception:
@@ -959,11 +938,11 @@ def generate_ai_winner_analysis(results, query):
         'duration': v.get('duration'), 'score': v.get('breakout_score', 0)
     } for v in top]
     prompt = f"""Analisis kandidat long-form baru untuk niche '{query}'. Jangan mengarang data. Temukan pola velocity, acceleration, channel baseline, durasi, judul, engagement, dan content opportunity. Berikan: Why breakout, winning formula, 5 content opportunities, red flags. Data: {json.dumps(compact, ensure_ascii=False)}"""
-    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}'
+    url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
     try:
-        r = requests.post(url, headers={'Content-Type': 'application/json'}, json={'contents': [{'parts': [{'text': prompt}]}]}, timeout=60); r.raise_for_status()
+        r = requests.post(url, headers={'Content-Type': 'application/json','x-goog-api-key':GEMINI_API_KEY}, json={'contents': [{'parts': [{'text': prompt}]}]}, timeout=60); r.raise_for_status()
         return r.json()['candidates'][0]['content']['parts'][0]['text']
-    except Exception as e: return f'❌ Gagal analisis AI: {e}'
+    except Exception: return 'Layanan AI belum tersedia. Periksa konfigurasi atau coba lagi nanti.'
 
 
 def get_artist_search_demand(artist, region_code='ID', freshness_days=7, max_results=50):
@@ -984,7 +963,7 @@ def get_artist_search_demand(artist, region_code='ID', freshness_days=7, max_res
     published_after = get_published_after_rfc3339(freshness_days)
     last_error = None
 
-    for attempt in range(len(API_KEYS)):
+    for attempt in range(min(1, len(API_KEYS))):
         key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
         youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
         try:
@@ -1110,7 +1089,7 @@ def get_artist_search_demand(artist, region_code='ID', freshness_days=7, max_res
 
     return {
         'artist': artist,
-        'error': last_error or 'Semua API key gagal/kuota habis.',
+        'error': last_error or 'Periksa kunci, izin API, atau kuota proyek.',
         'search_results_estimate': 0,
         'videos_found': 0,
         'recent_videos': 0,

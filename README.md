@@ -1,6 +1,8 @@
-# Niche Hunter, SEO Studio dan ruang riset
+# Niche Hunter 2.0 — riset, optimasi dan produksi konten
 
-Versi pengembangan 13 Oktober 2026. Aplikasi riset YouTube pribadi berbasis Streamlit. Tujuh mode awal tetap tersedia, ditambah SEO Studio, Ruang riset, dan Evaluasi channel.
+Versi 14 Oktober 2026 (WIB). Aplikasi riset YouTube pribadi berbasis Streamlit dengan 16 mode. Upgrade menambahkan Keyword Lab, Radar kompetitor, Rank Tracker, Kalender konten, Eksperimen CTR dan Audit massal.
+
+Mulai dari [UPGRADE_GUIDE.md](UPGRADE_GUIDE.md). Perbandingan dengan vidIQ/TubeBuddy dan temuan audit ada di [COMPARISON_REPORT.md](COMPARISON_REPORT.md). Hasil pengujian ada di [VALIDATION.md](VALIDATION.md).
 
 ## Mulai
 
@@ -13,7 +15,7 @@ python -m streamlit run app.py
 
 Tanpa kunci API, SEO Studio, brief dasar, watchlist dan impor CSV tetap dapat dibuka. Riset data YouTube memerlukan kunci YouTube. Paket konten AI memerlukan Gemini.
 
-Simpan kunci pada `.streamlit/secrets.toml` atau pengaturan Secrets hosting Anda:
+Simpan kunci pada `.streamlit/secrets.toml`, pengaturan Secrets hosting, atau environment Anda:
 
 ```toml
 YOUTUBE_API_KEY = "ISI_KUNCI_ANDA"
@@ -21,7 +23,7 @@ GEMINI_API_KEY = "ISI_KUNCI_ANDA"
 GROQ_API_KEY = "ISI_KUNCI_ANDA"
 ```
 
-`YOUTUBE_API_KEYS` juga menerima daftar atau string kunci dipisahkan koma seperti versi sebelumnya. Jangan memasukkan Secrets ke git. Pergantian kunci bukan pengganti persetujuan penambahan kuota dari penyedia.
+`YOUTUBE_API_KEYS` juga menerima daftar atau string kunci dipisahkan koma seperti versi sebelumnya. Jangan memasukkan Secrets ke git. Pilih kunci aktif di Pengaturan dan bantuan bila perlu. Aplikasi tidak merotasi kunci otomatis saat kuota habis; pergantian kunci bukan pengganti penambahan kuota dari penyedia.
 
 ## Pembaruan proyek lama
 
@@ -59,7 +61,7 @@ Klik **Simpan watchlist** pada video untuk menyimpan referensi. Niche dan channe
 
 Riwayat menyimpan 30 riset terakhir dan maksimal 50 referensi per riset. Referensi dalam riwayat dapat ditambahkan ke watchlist. Data snapshot tersedia sebagai grafik apabila video memiliki setidaknya dua pengukuran dalam database. Snapshot bertambah ketika video dipindai melalui Viral Intelligence, bukan secara otomatis melalui pekerjaan terjadwal.
 
-Unduh cadangan JSON dari tab Cadangan. Pemulihan menggabungkan watchlist, brief dan riwayat berdasarkan ID. Entri dengan ID yang sama diperbarui. Cadangan JSON tidak memuat database snapshot; untuk memindahkan seluruh histori snapshot, cadangkan direktori data saat aplikasi berhenti.
+Unduh cadangan JSON dari tab Cadangan. Pemulihan schema 2 menggabungkan watchlist, brief, riwayat, riset keyword, rank tracking, kalender dan eksperimen berdasarkan ID. Schema 1 lama tetap dapat dipulihkan. Entri dengan ID yang sama diperbarui. Cadangan JSON tidak memuat database snapshot; untuk memindahkan seluruh histori snapshot, cadangkan direktori data saat aplikasi berhenti.
 
 ### Evaluasi channel sendiri
 
@@ -89,7 +91,7 @@ Jika integrasi otomatis dibangun, aplikasi akan membuka halaman Google melalui O
 - VPH pencarian adalah rata-rata views sejak publikasi. Velocity Viral Intelligence memakai selisih snapshot jika interval minimal lima menit tersedia. Scan terlalu dekat kembali ke rata-rata sejak publikasi dan tidak dianggap bukti akselerasi.
 - Penyimpanan snapshot memiliki jarak minimal lima menit per video. Akselerasi tidak menyumbang poin breakout ketika kurang dari dua snapshot historis yang dapat digunakan.
 - Detail breakout menampilkan komponen, bobot, kontribusi dan kecukupan snapshot/baseline. Bobot tetap heuristik dan belum dikalibrasi lewat studi prediksi.
-- Analisis channel menyediakan sampel 5, 15, 30 atau 50 video serta median. Video dengan usia berbeda belum dinormalisasi, sehingga perbandingan perlu mempertimbangkan usia dan format. Baseline Viral Intelligence juga menggunakan VPH rata-rata sejak publikasi; perbandingan dengan velocity interval belum menggunakan jendela waktu yang setara.
+- Analisis channel menyediakan sampel 5, 15, 30 atau 50 video serta median. Video dengan usia berbeda belum dinormalisasi, sehingga perbandingan perlu mempertimbangkan usia dan format. Baseline Viral Intelligence sekarang menggunakan median VPH sejak publikasi pada video sebanding, tidak dibagi dengan velocity snapshot. Lihat metodologi baru di panduan upgrade.
 - Pola jam publikasi menunjukkan kebiasaan channel, bukan bukti waktu publikasi optimal.
 - Pendapatan menggunakan simulasi dengan asumsi RPM minimum/maksimum yang diisi sendiri. Data publik tidak mengungkap pendapatan channel.
 
@@ -102,12 +104,12 @@ Semua sesi yang memakai instalasi dan direktori data yang sama berbagi watchlist
 ## Pengujian
 
 ```bash
-python -m unittest tests.test_ui tests.test_growth tests.test_usability -v
+python -m unittest discover -s tests -v
 ```
 
 Pengujian menggunakan data simulasi dan tidak memanggil API nyata. Cakupan meliputi tujuh mode awal, state hasil pencarian, AI lama, pagination, perbandingan, SEO Studio, relevansi, chapter, penyimpanan lintas koneksi, pemulihan atomik, batas riwayat, pemetaan CSV, navigasi ke SEO, serta startup tanpa kredensial.
 
-YouTube/Gemini/Groq belum diuji end-to-end dengan kredensial nyata dalam lingkungan pengembangan ini. Layout diperiksa melalui struktur widget AppTest, bukan tangkapan layar browser. Dokumen `ANALISIS_UI_UX.md` merupakan audit versi sebelumnya, bukan laporan validasi fitur baru.
+YouTube/Gemini/Groq belum diuji end-to-end dengan kredensial nyata dalam lingkungan pengembangan ini. Interaksi UI diperiksa melalui Streamlit AppTest. Pemeriksaan browser visual belum selesai; lihat VALIDATION.md. Dokumen `ANALISIS_UI_UX.md` merupakan audit versi sebelumnya, bukan laporan validasi fitur baru.
 
 ## Rujukan desain audit
 

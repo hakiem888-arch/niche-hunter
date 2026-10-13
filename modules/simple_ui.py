@@ -19,6 +19,9 @@ import requests
 import streamlit as st
 from modules.growth_ui import seo_page, research_page, evaluation_page, open_seo, save_watch
 from modules.growth_engine import ResearchStore, safe_video
+from modules.intelligence import csv_bytes
+from modules.workspace_ui import keyword_page, rank_page, competitor_page, planner_page, experiment_page, bulk_page
+import sqlite3
 
 
 def clean_label(value):
@@ -117,7 +120,7 @@ def save_result(key, rows, **context):
     if rows:
         try:
             ResearchStore().save('history', str(time.time_ns()), {'mode': key, 'query': context.get('query',''), 'context': context.get('context',''), 'jumlah':len(rows), 'videos':[safe_video(r) for r in rows[:50] if r.get('id') and r.get('title') and r.get('link')]})
-        except OSError:
+        except (OSError, sqlite3.Error):
             st.warning('Riwayat belum tersimpan. Hasil tetap tersedia selama sesi.')
     st.session_state[key] = {"rows": rows, "at": datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M UTC"),
                              "revision": time.time_ns(), **context}
@@ -130,7 +133,7 @@ def result_header(bundle, filename):
         st.subheader(f"{len(bundle['rows'])} hasil")
         st.caption(f"{bundle.get('query', '')} | {bundle.get('context', '')} | {bundle['at']}")
     with b:
-        st.download_button("Unduh CSV", pd.DataFrame(bundle["rows"]).to_csv(index=False).encode("utf-8-sig"),
+        st.download_button("Unduh CSV", csv_bytes(bundle["rows"]),
                            filename, "text/csv", key="csv_" + filename, use_container_width=True)
 
 
@@ -372,7 +375,7 @@ def viral_page(backend):
                   "VPH": v.get("velocity_vph", 0), "Akselerasi": v.get("acceleration", 1),
                   "Kelipatan baseline": v.get("channel_breakout_multiple", 0), "Views/subs": v.get("ratio", 0)} for v in rows]
         st.dataframe(pd.DataFrame(table), use_container_width=True, hide_index=True)
-        st.caption("Kandidat diurutkan oleh mesin skor asli. Pemilihan detail tersedia pada tab berikutnya.")
+        st.caption("Kelipatan baseline membandingkan VPH sejak publikasi kedua sisi. Velocity dapat memakai interval snapshot; keduanya tidak dicampur dalam rasio baseline.")
         with st.expander("Small Channel Breakouts"):
             gems = backend.small_channel_gems(rows)
             if gems:
@@ -397,6 +400,7 @@ def viral_page(backend):
             for reason in chosen.get("breakout_reasons", []):
                 st.write(reason)
             st.caption(f"Snapshot tersedia: {chosen.get('snapshot_count', 0)}. Scan pertama dapat menggunakan rata-rata sejak publikasi.")
+            st.caption(chosen.get('baseline_basis', 'Baseline sebanding belum tersedia.'))
             if chosen.get("channel_baseline_samples", 0) < 3:
                 st.warning("Sampel baseline channel kurang dari 3 video. Perlakukan skor sebagai sinyal awal.")
             st.caption('Skor heuristik belum dikalibrasi sebagai probabilitas viral. Indikator dapat saling berkorelasi.')
@@ -688,12 +692,17 @@ def render_app(services):
     st.session_state.setdefault("nav_section", prefs.get("section", "Video"))
     with st.sidebar:
         st.markdown('<div class="brand"><span class="brand-mark">N</span><div><strong>Niche Hunter</strong><small>Ruang riset pribadi</small></div></div>', unsafe_allow_html=True)
-        section = st.radio("Ruang kerja", ["Video", "Channel", "Artis", "Studio"], key="nav_section")
+        section = st.radio("Ruang kerja", ["Video", "Channel", "Artis", "Riset", "Studio"], key="nav_section")
         prefs["section"] = section
         queue = st.session_state.get("compare_list", [])
         st.caption(f"Perbandingan: {len(queue)}/4 channel")
         with st.expander("Pengaturan dan bantuan"):
             st.caption(f'YouTube: {len(backend.API_KEYS)} kunci tersedia')
+            if len(backend.API_KEYS)>1:
+                st.selectbox('Kunci YouTube aktif',range(len(backend.API_KEYS)),format_func=lambda i:f'Kunci {i+1}',key='current_api_index')
+            usage=st.session_state.get('youtube_usage',{})
+            st.caption(f"Panggilan API sesi: {usage.get('calls',0)} · pencarian: {usage.get('search',0)} · cache: {usage.get('cache_hits',0)}")
+            st.caption('Cache 5 menit. Angka di atas menghitung panggilan sesi ini, bukan saldo kuota proyek. Kunci tidak diputar otomatis saat kuota habis.')
             st.caption("Gemini: " + ("tersedia" if backend.GEMINI_API_KEY else "belum diatur"))
             try:
                 groq = bool(st.secrets.get("GROQ_API_KEY", ""))
@@ -703,7 +712,9 @@ def render_app(services):
             st.write("Gunakan filter lanjutan untuk mempersempit pencarian. Semua fitur tersedia di ruang kerja yang sesuai.")
             st.caption("Hasil dan jawaban AI tersimpan selama sesi browser. CSV dapat diunduh untuk disimpan.")
     options = {"Video": ["Pencarian", "Trending", "Viral Intelligence"],
-               "Channel": ["Direktori", "Analisis", "Perbandingan"], "Artis": ["Perbandingan artis"], "Studio": ["SEO Studio", "Ruang riset", "Evaluasi channel"]}[section]
+               "Channel": ["Direktori", "Analisis", "Perbandingan"], "Artis": ["Perbandingan artis"],
+               "Riset": ["Keyword Lab", "Radar kompetitor", "Rank Tracker"],
+               "Studio": ["SEO Studio", "Ruang riset", "Evaluasi channel", "Kalender konten", "Eksperimen CTR", "Audit massal"]}[section]
     key = "nav_" + section
     if key not in st.session_state:
         st.session_state[key] = prefs.get(section + "_page", options[0])
@@ -718,5 +729,8 @@ def render_app(services):
         {"Direktori": directory_page, "Analisis": analysis_page, "Perbandingan": comparison_page}[page](backend)
     elif section == 'Artis':
         artists_page(backend)
+    elif section == 'Riset':
+        {'Keyword Lab':keyword_page,'Radar kompetitor':competitor_page,'Rank Tracker':rank_page}[page](backend)
     else:
-        {'SEO Studio':seo_page,'Ruang riset':research_page,'Evaluasi channel':evaluation_page}[page](backend)
+        {'SEO Studio':seo_page,'Ruang riset':research_page,'Evaluasi channel':evaluation_page,
+         'Kalender konten':planner_page,'Eksperimen CTR':experiment_page,'Audit massal':bulk_page}[page](backend)

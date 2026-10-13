@@ -1,3 +1,17 @@
+# Niche Hunter 2.0 — 14 Oktober 2026 (WIB)
+
+- Enam mode baru: Keyword Lab, Radar kompetitor, Rank Tracker, Kalender konten, Eksperimen CTR dan Audit massal.
+- Pratinjau dua judul/thumbnail, analisis CTR manual beserta interval ketidakpastian; tidak melakukan rotasi varian otomatis.
+- VPH channel dihitung dari statistik numerik dan usia publikasi; baseline outlier sebanding serta mengecualikan target.
+- Sumber kandidat dipilih bergiliran dan urutan hasil pencarian dipertahankan setelah pengambilan statistik.
+- Client YouTube menggunakan cache 5 menit, timeout, retry terbatas, error yang disanitasi dan hitungan panggilan sesi.
+- Uploads playlist menggantikan pencarian untuk baseline channel; rotasi kunci otomatis dihentikan.
+- Pemeriksaan batas metadata ditambah; tag lengkap dipertahankan. CSV riset/fitur baru melindungi teks formula.
+- Catatan watchlist bertahan saat referensi disimpan ulang. Cadangan schema 2 memuat data fitur baru, menerima schema 1.
+- Header API key Gemini, HTTPS autocomplete dan error AI yang tidak memuat respons mentah.
+- 57 tes lulus (29 sebelumnya + 28 tambahan) serta startup HTTP berhasil. API nyata/browser visual belum diverifikasi.
+- Laporan perbandingan dan petunjuk upgrade disertakan.
+
 # Pembaruan watchlist dan evaluasi, 13 Oktober 2026
 
 - Tombol hapus watchlist terlihat langsung pada daftar. Penghapusan memakai callback sebelum perenderan ulang dan menyampaikan hasil operasi.

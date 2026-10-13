@@ -27,7 +27,7 @@ def delete_research(kind, ident):
 def open_seo(video):
     # Widget keys are reset in the callback, before the next render.
     for key, value in {'seo_title': video.get('title',''), 'seo_description':video.get('description',''),
-                       'seo_tags': ', '.join(video.get('tags',[])), 'seo_content':'', 'seo_keyword':'',
+                       'seo_tags': ', '.join(video.get('tags',[])), 'seo_content':'', 'seo_keyword':video.get('keyword',''),
                        'seo_audience':'', 'seo_angle':''}.items():
         st.session_state[key] = value
     st.session_state['seo_reference'] = safe_video(video)
@@ -37,9 +37,12 @@ def open_seo(video):
 
 def save_watch(video):
     try:
-        store().save('watchlist', video.get('id') or sha256(json.dumps(video,sort_keys=True).encode()).hexdigest()[:20], {'video': safe_video(video), 'note':''})
+        ident = video.get('id') or sha256(json.dumps(video,sort_keys=True).encode()).hexdigest()[:20]
+        db = store()
+        old = next((e['payload'] for e in db.list('watchlist') if e['id']==ident),{})
+        db.save('watchlist', ident, {'video': safe_video(video), 'note':old.get('note','')})
         st.session_state['notice'] = 'Video tersimpan di watchlist.'
-    except OSError:
+    except (OSError, sqlite3.Error):
         st.session_state['notice'] = 'Watchlist belum tersimpan. Periksa direktori data aplikasi.'
 
 def ai_package(backend, inputs):
@@ -87,6 +90,8 @@ def seo_page(backend):
     if not result: return
     source, audit = result['inputs'], result['audit']
     st.metric('Skor audit internal', f"{audit['score']}/100")
+    st.caption(f"Judul {audit.get('title_characters',0)}/100 karakter · Deskripsi {audit.get('description_bytes',0)}/5.000 byte · Tag {audit.get('tag_characters',0)}/500 karakter")
+    if audit.get('blocking_issues'): st.error('Batas metadata belum terpenuhi. Skor relevansi tinggi tidak menghapus masalah ini.')
     st.caption(audit['basis'])
     if inputs != source: st.info('Form sudah berubah. Jalankan audit kembali untuk memperbarui hasil di bawah.')
     for warning in audit['warnings']: st.warning(warning)
