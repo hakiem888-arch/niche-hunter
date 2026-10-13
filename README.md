@@ -1,58 +1,98 @@
-# Niche Hunter, tampilan sederhana
+# Niche Hunter, SEO Studio dan ruang riset
 
-Revisi antarmuka untuk penggunaan pribadi. Tujuh mode aplikasi asli tetap tersedia, dikelompokkan menjadi Video, Channel, dan Artis. Mesin pengambilan data dan 45 fungsi kalkulasi/layanan asli dipertahankan. Detail audit terdapat pada ANALISIS_UI_UX.md.
+Versi pengembangan 13 Oktober 2026. Aplikasi riset YouTube pribadi berbasis Streamlit. Tujuh mode awal tetap tersedia, ditambah SEO Studio, Ruang riset, dan Evaluasi channel.
 
-## Menjalankan
+## Mulai
 
-Gunakan Python 3.10 atau lebih baru. Pemeriksaan revisi dilakukan dengan Python 3.12.14 dan Streamlit 1.65.0.
+Gunakan Python 3.10 atau lebih baru, lalu jalankan dari direktori proyek:
 
 ```bash
-pip install -r requirements.txt
-streamlit run app.py
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
 ```
 
-Gunakan konfigurasi Secrets milik aplikasi Anda, dengan nama yang tetap sama:
+Tanpa kunci API, SEO Studio, brief dasar, watchlist dan impor CSV tetap dapat dibuka. Riset data YouTube memerlukan kunci YouTube. Paket konten AI memerlukan Gemini.
 
-- `YOUTUBE_API_KEYS`, string berisi kunci yang dipisahkan koma, atau daftar kunci.
-- `YOUTUBE_API_KEY`, alternatif untuk satu kunci.
-- `GEMINI_API_KEY`, untuk ide konten dan analisis breakout.
-- `GROQ_API_KEY`, untuk Channel DNA.
+Simpan kunci pada `.streamlit/secrets.toml` atau pengaturan Secrets hosting Anda:
 
-Pada komputer sendiri, gunakan `.streamlit/secrets.toml`. Pada Streamlit Community Cloud, pertahankan Secrets yang sudah ada. Tidak ada kunci API nyata di dalam paket ini.
+```toml
+YOUTUBE_API_KEY = "ISI_KUNCI_ANDA"
+GEMINI_API_KEY = "ISI_KUNCI_ANDA"
+GROQ_API_KEY = "ISI_KUNCI_ANDA"
+```
 
-## Menerapkan ke proyek yang sudah ada
+`YOUTUBE_API_KEYS` juga menerima daftar atau string kunci dipisahkan koma seperti versi sebelumnya. Jangan memasukkan Secrets ke git. Pergantian kunci bukan pengganti persetujuan penambahan kuota dari penyedia.
 
-1. Buat commit atau cadangan proyek saat ini.
-2. Ganti `app.py` dan `requirements.txt` dari paket ini.
-3. Tambahkan `modules/simple_ui.py` dan `modules/simple_ui.css`.
-4. Pertahankan `modules/ai_engine.py` serta `modules/opportunity_engine.py`. Salinan di paket ini identik dengan sumber unggahan.
-5. Tambahkan atau gabungkan pengaturan warna `.streamlit/config.toml` jika menginginkan aksen hijau dan latar terang. Jangan menimpa pengaturan proyek lain yang Anda butuhkan.
-6. Jalankan dahulu, kemudian perbarui deployment melalui repositori yang terhubung apabila hasilnya sudah sesuai.
+## Pembaruan proyek lama
 
-Aplikasi pada tautan publik belum diubah oleh revisi ini. Folder `tests` hanya diperlukan untuk pengujian, bukan untuk menjalankan aplikasi.
+1. Cadangkan folder proyek dan Secrets.
+2. Ganti `app.py`, `modules/`, `tests/`, `requirements.txt`, serta dokumentasi dengan isi paket ini. Pertahankan Secrets nyata dan pengaturan deployment Anda.
+3. Pertahankan direktori `data/` dari versi ini ketika melakukan pembaruan berikutnya. Jangan menggantinya dengan data dari perangkat lain.
+4. Jika database snapshot versi lama berada pada `niche_hunter_snapshots.db` di akar proyek, aplikasi menyalin database tersebut ke direktori data saat pertama dijalankan, apabila database tujuan belum ada.
+5. Jalankan pengujian dan aplikasi secara lokal, kemudian perbarui deployment Anda.
 
-## Alur penggunaan
+Paket ini tidak mengubah deployment publik atau repositori eksternal secara otomatis.
 
-- Video > Pencarian: kata kunci, wilayah, urutan, lalu Cari video. Filter lainnya tersedia di Filter lanjutan.
-- Video > Trending: wilayah dan kategori, kemudian Lihat trending.
-- Video > Viral Intelligence: niche, wilayah, rentang publikasi. Hasil dipisah menjadi Kandidat, Detail dan radar, serta Peluang konten.
-- Channel > Direktori: pencarian channel beserta seluruh filter asli.
-- Channel > Analisis: statistik, lima video sampel terbaru, pola publikasi, dan tag.
-- Channel > Perbandingan: hingga empat channel dalam tabel yang sama.
-- Artis: dua nama utama. Tiga nama tambahan dan pengaturan analisis bisa dibuka sesuai kebutuhan.
+## Alur fitur baru
 
-Kartu video menampilkan data pokok. Buka Detail, SEO, dan tindakan untuk seluruh indikator, ringkasan, analisis channel, perbandingan, Channel DNA, serta unduhan thumbnail. Pagination menampilkan enam kartu per halaman. Semua hasil tetap tersedia pada halaman lain, tampilan tabel, dan CSV.
+### SEO Studio
 
-Saran kata kunci tetap tersedia. Google Trends baru diambil ketika tombol Muat tren kata kunci dipilih. Fungsi AI dijalankan lewat tombol masing-masing. Detail yang tertutup tidak otomatis menunda eksekusi kode Streamlit, sehingga panggilan jaringan tetap diberi pemicu tombol secara eksplisit.
+Dari detail video atau kandidat Viral Intelligence, klik **Optimalkan ide ini**. Judul, deskripsi dan tag referensi akan masuk ke formulir. Kata kunci target dan ringkasan/transkrip diisi sendiri untuk memastikan audit sesuai konteks.
 
-Hasil pencarian dan trending memiliki penyimpanan sesi yang terpisah. Hasil AI terikat pada referensinya dan tetap tampil setelah interaksi lain. Data analisis channel dipakai ulang selama maksimal 15 menit dalam sesi, dengan tombol Perbarui data. Penyimpanan sesi tidak bertahan setelah sesi browser berakhir; unduh CSV jika ingin menyimpan hasil riset.
+Klik **Audit dan siapkan brief**. Hasil menampilkan komponen rubrik internal dengan saran perbaikan. Rubrik memeriksa cakupan kata kunci pada judul, pembuka deskripsi, dan ringkasan/transkrip. Pemeriksaan bersifat leksikal, tidak mengukur seluruh makna atau maksud pencarian. Skor bukan skor resmi YouTube, probabilitas viral, atau prediksi posisi pencarian.
+
+Tab Riset pendukung memakai hasil pencarian atau Viral Intelligence dari sesi berjalan dengan kata kunci yang sama. Frekuensi kata merupakan frekuensi pada sampel video, bukan volume pencarian resmi. Kandidat celah pembahasan berasal dari cakupan lima kategori maksud pembahasan pada judul/deskripsi sampel. Verifikasi isi video sebelum menyimpulkan celah pasar.
+
+Brief dasar merupakan kerangka kerja berdasarkan masukan pengguna. Paket AI menghasilkan alternatif judul, deskripsi, keyword, tag pendukung, konsep thumbnail, hook dan outline. AI hanya dipanggil ketika tombol dipilih dan ringkasan/transkrip tersedia. Jawaban perlu ditinjau sebelum publikasi. Masukan formulir yang diaudit dikirim ke Gemini, bukan seluruh watchlist atau laporan CSV.
+
+Chapter hanya dibuat dari baris timestamp yang ada pada transkrip, misalnya `00:00 Pembukaan`. Pemeriksaan dasar mensyaratkan minimal tiga bagian, awal 00:00, urutan naik, dan jarak minimal 10 detik. Durasi chapter terakhir perlu diperiksa terhadap durasi video. Aplikasi tidak menciptakan timestamp dari ringkasan.
+
+### Ruang riset
+
+Klik **Simpan watchlist** pada video untuk menyimpan referensi. Niche dan channel dapat ditambahkan secara manual. Catatan dan brief disimpan dalam SQLite, sehingga dapat dibuka kembali setelah sesi browser berakhir pada instalasi yang sama.
+
+Riwayat menyimpan 30 riset terakhir dan maksimal 50 referensi per riset. Referensi dalam riwayat dapat ditambahkan ke watchlist. Data snapshot tersedia sebagai grafik apabila video memiliki setidaknya dua pengukuran dalam database. Snapshot bertambah ketika video dipindai melalui Viral Intelligence, bukan secara otomatis melalui pekerjaan terjadwal.
+
+Unduh cadangan JSON dari tab Cadangan. Pemulihan menggabungkan watchlist, brief dan riwayat berdasarkan ID. Entri dengan ID yang sama diperbarui. Cadangan JSON tidak memuat database snapshot; untuk memindahkan seluruh histori snapshot, cadangkan direktori data saat aplikasi berhenti.
+
+### Evaluasi channel sendiri
+
+Ekspor CSV per video dari YouTube Studio, pilih periode yang konsisten, lalu unggah melalui menu **Studio > Evaluasi channel**. Petakan Video ID atau Judul, Views, dan kolom opsional Impresi, CTR (%) dan persentase rata-rata ditonton (%).
+
+Format numerik: angka tanpa pemisah ribuan dan titik sebagai pemisah desimal. CTR menggunakan skala 0 sampai 100. Persentase rata-rata ditonton menerima nilai nonnegatif, termasuk lebih dari 100 bila demikian tercatat pada sumber. Nilai kosong dalam kolom numerik yang dipetakan perlu dibersihkan atau kolom tersebut dibiarkan tidak dipetakan. CSV maksimal 10 MB dan 10.000 baris.
+
+Hasil berisi tabel per video, median, grafik CTR terhadap persentase ditonton, dan saran peninjauan relatif terhadap median sampel. Ini bukan diagnosis sebab-akibat. Baris Total dikeluarkan. Median CTR per video bukan CTR agregat channel. Laporan tinggal dalam sesi aplikasi dan tidak dikirim ke AI atau disimpan secara otomatis ke database.
+
+Koneksi OAuth belum ditambahkan. Impor CSV merupakan jalur evaluasi channel sendiri pada versi ini.
+
+## Indikator yang diperjelas
+
+- Skor lama pada hasil pencarian sekarang merupakan **kelengkapan metadata**, menggunakan aspek yang dapat diamati tanpa kata kunci target/transkrip. Jumlah tag tidak menambah nilai. Audit relevansi penuh tersedia di SEO Studio.
+- VPH pencarian adalah rata-rata views sejak publikasi. Velocity Viral Intelligence memakai selisih snapshot jika interval minimal lima menit tersedia. Scan terlalu dekat kembali ke rata-rata sejak publikasi dan tidak dianggap bukti akselerasi.
+- Penyimpanan snapshot memiliki jarak minimal lima menit per video. Akselerasi tidak menyumbang poin breakout ketika kurang dari dua snapshot historis yang dapat digunakan.
+- Detail breakout menampilkan komponen, bobot, kontribusi dan kecukupan snapshot/baseline. Bobot tetap heuristik dan belum dikalibrasi lewat studi prediksi.
+- Analisis channel menyediakan sampel 5, 15, 30 atau 50 video serta median. Video dengan usia berbeda belum dinormalisasi, sehingga perbandingan perlu mempertimbangkan usia dan format. Baseline Viral Intelligence juga menggunakan VPH rata-rata sejak publikasi; perbandingan dengan velocity interval belum menggunakan jendela waktu yang setara.
+- Pola jam publikasi menunjukkan kebiasaan channel, bukan bukti waktu publikasi optimal.
+- Pendapatan menggunakan simulasi dengan asumsi RPM minimum/maksimum yang diisi sendiri. Data publik tidak mengungkap pendapatan channel.
+
+## Data pribadi dan hosting
+
+Aplikasi ini dirancang untuk satu pengguna pribadi. SQLite tersimpan dalam `data/` secara default. Gunakan variabel lingkungan `NICHE_HUNTER_DATA_DIR` untuk menunjuk direktori/volume persisten. Folder dibuat otomatis dan tidak diikutkan dalam git atau ZIP ini.
+
+Semua sesi yang memakai instalasi dan direktori data yang sama berbagi watchlist, riwayat dan brief. Gunakan akses hosting privat. Jangan memakai versi ini sebagai layanan multiuser publik tanpa autentikasi serta pemisahan database pengguna. Disk sementara pada hosting dapat hilang setelah redeployment. Gunakan cadangan JSON dan volume persisten untuk menjaga data.
 
 ## Pengujian
 
 ```bash
-python -m unittest tests.test_ui -v
+python -m unittest tests.test_ui tests.test_growth -v
 ```
 
-Pengujian memakai data simulasi dan tidak menggunakan kuota YouTube atau AI. Sepuluh skenario mencakup navigasi tujuh mode, filter, autocomplete, pagination, pemisahan hasil, persistensi AI, cache analisis channel, kapasitas perbandingan, Viral Intelligence, dan perbandingan artis.
+Pengujian menggunakan data simulasi dan tidak memanggil API nyata. Cakupan meliputi tujuh mode awal, state hasil pencarian, AI lama, pagination, perbandingan, SEO Studio, relevansi, chapter, penyimpanan lintas koneksi, pemulihan atomik, batas riwayat, pemetaan CSV, navigasi ke SEO, serta startup tanpa kredensial.
 
-Pencarian aplikasi asli juga diperiksa melalui browser dan berhasil. Entry point revisi diperiksa dengan AppTest dan kunci dummy tanpa memanggil API. Akses YouTube/Gemini/Groq pada revisi belum diuji end-to-end dengan kredensial nyata. Pemeriksaan visual aplikasi revisi melalui cloud browser belum dapat dilakukan karena browser tersebut tidak dapat menjangkau server lokal. CSS responsif disertakan, tetapi belum merupakan hasil uji perangkat seluler.
+YouTube/Gemini/Groq belum diuji end-to-end dengan kredensial nyata dalam lingkungan pengembangan ini. Layout diperiksa melalui struktur widget AppTest, bukan tangkapan layar browser. Dokumen `ANALISIS_UI_UX.md` merupakan audit versi sebelumnya, bukan laporan validasi fitur baru.
+
+## Rujukan desain audit
+
+- [Cara kerja YouTube Search](https://support.google.com/youtube/answer/16090438?hl=en)
+- [Peran tag video](https://support.google.com/youtube/answer/146402?hl=en)
+- [Otorisasi laporan channel](https://developers.google.com/youtube/analytics/channel_reports)

@@ -9,6 +9,9 @@ import json
 import sqlite3
 import math
 import statistics
+import os
+from pathlib import Path
+from modules.growth_engine import metadata_check
 import matplotlib.pyplot as plt
 from collections import Counter
 from pytrends.request import TrendReq
@@ -40,13 +43,15 @@ else:
 API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()]
 
 if not API_KEYS:
-    st.error("API Key YouTube belum disetting di Secrets!")
-    st.stop()
+    st.warning("YouTube API belum diatur. SEO Studio, ruang riset, dan impor CSV dapat digunakan tanpa kunci YouTube.")
 
 if 'current_api_index' not in st.session_state:
     st.session_state.current_api_index = 0
 
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+try:
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+except FileNotFoundError:
+    GEMINI_API_KEY = ""
 
 # ==========================================
 # 2. DATA REFERENSI
@@ -283,28 +288,27 @@ def parse_duration(iso_duration):
     except: return "N/A"
 
 def estimate_earnings(views, region_code):
-    est = (views / 1000) * (10000 if region_code in ['ID', 'MY'] else 3)
-    if region_code in ['ID', 'MY']: return f"Rp {est/1000000:.1f}Jt" if est >= 1000000 else f"Rp {est/1000:.0f}Rb"
-    return f"$ {est:,.0f}"
+    # Explicit scenarios; public video data does not reveal creator revenue.
+    return "Gunakan simulasi RPM pada detail video"
+
 
 def calculate_er(views, likes, comments): return round(((likes + comments) / views) * 100, 2) if views > 0 else 0
 
 def calculate_seo_score(title, desc, tags):
-    score = 0; checks = []
-    if 20 <= len(title) <= 60: score += 40; checks.append("✅ Panjang Judul Ideal (20-60 karakter)")
-    else: score += 20; checks.append(f"❌ Judul Kurang Optimal ({len(title)} karakter)")
-    if len(desc) > 200: score += 30; checks.append("✅ Deskripsi Panjang & Informatif")
-    elif len(desc) > 0: score += 10; checks.append("❌ Deskripsi Terlalu Pendek")
-    else: checks.append("❌ Tidak Ada Deskripsi")
-    if tags and len(tags) >= 3: score += 30; checks.append(f"✅ Menggunakan Tags ({len(tags)} tags terdeteksi)")
-    else: checks.append("❌ Minim / Tidak Ada Tags")
-    return score, checks
+    return metadata_check(title, desc, tags)
+
 
 # ==========================================
 # VIRAL INTELLIGENCE V2
 # New long-form videos + breakout prediction
 # ==========================================
-SNAPSHOT_DB = "niche_hunter_snapshots.db"
+DATA_DIR = Path(os.environ.get("NICHE_HUNTER_DATA_DIR", "data"))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+SNAPSHOT_DB = str(DATA_DIR / "niche_hunter_snapshots.db")
+# Preserve existing local snapshot history on first upgrade.
+if not Path(SNAPSHOT_DB).exists() and Path("niche_hunter_snapshots.db").exists():
+    with sqlite3.connect("niche_hunter_snapshots.db") as old, sqlite3.connect(SNAPSHOT_DB) as new:
+        old.backup(new)
 
 
 def init_snapshot_db():
@@ -350,6 +354,9 @@ def save_video_snapshots(results):
     now = datetime.utcnow().isoformat()
     conn = sqlite3.connect(SNAPSHOT_DB)
     for v in results:
+        last = conn.execute("SELECT captured_at FROM video_snapshots WHERE video_id=? ORDER BY captured_at DESC LIMIT 1", (v['id'],)).fetchone()
+        if last and (datetime.fromisoformat(now) - datetime.fromisoformat(last[0])).total_seconds() < 300:
+            continue
         conn.execute(
             "INSERT INTO video_snapshots(video_id,captured_at,views,likes,comments,subscribers) VALUES(?,?,?,?,?,?)",
             (v['id'], now, int(v.get('raw_views', v.get('views', 0))), int(v.get('raw_likes', 0)),
@@ -381,6 +388,8 @@ def calculate_v2_velocity_and_acceleration(video):
 
     latest_time = datetime.fromisoformat(rows[0][0])
     elapsed = max((now - latest_time).total_seconds() / 3600, 0.05)
+    if (now - latest_time).total_seconds() < 300:
+        return float(video.get("vph", 0)), 1.0, 0, 0
     current_interval_vph = max((current_views - int(rows[0][1])) / elapsed, 0)
 
     # With only one historical snapshot, we can measure velocity but not true acceleration.
@@ -388,7 +397,9 @@ def calculate_v2_velocity_and_acceleration(video):
         return current_interval_vph, 1.0, int(video.get('vph', 0)), 1
 
     prev_time = datetime.fromisoformat(rows[1][0])
-    interval_hours = max((latest_time - prev_time).total_seconds() / 3600, 0.05)
+    if (latest_time - prev_time).total_seconds() < 300:
+        return current_interval_vph, 1.0, 0, 1
+    interval_hours = (latest_time - prev_time).total_seconds() / 3600
     previous_interval_vph = max((int(rows[0][1]) - int(rows[1][1])) / interval_hours, 0)
     if previous_interval_vph <= 0:
         acceleration = 3.0 if current_interval_vph > 0 else 1.0
@@ -487,6 +498,7 @@ def extract_keywords(text):
     return [item[0] for item in Counter(words).most_common(5)]
 
 def analyze_channel_deep(channel_id):
+    sample_limit = int(st.session_state.get("channel_sample_size", 5))
     for attempt in range(len(API_KEYS)):
         key_idx = (st.session_state.current_api_index + attempt) % len(API_KEYS)
         youtube = build('youtube', 'v3', developerKey=API_KEYS[key_idx])
@@ -494,7 +506,7 @@ def analyze_channel_deep(channel_id):
             ch_data = youtube.channels().list(id=channel_id, part='snippet,statistics,contentDetails').execute()['items'][0]
             uploads_id = ch_data['contentDetails']['relatedPlaylists']['uploads']
             
-            pl_res = youtube.playlistItems().list(playlistId=uploads_id, part='snippet', maxResults=15).execute()
+            pl_res = youtube.playlistItems().list(playlistId=uploads_id, part='snippet', maxResults=max(15, sample_limit)).execute()
             vid_ids = [item['snippet']['resourceId']['videoId'] for item in pl_res.get('items', [])]
             
             recent_videos = []
@@ -514,7 +526,7 @@ def analyze_channel_deep(channel_id):
                     vid_tags = snippet.get('tags', [])
                     all_tags.extend(vid_tags)
                     
-                    if i < 5:
+                    if i < sample_limit:
                         recent_videos.append({
                             'title': snippet['title'], 
                             'views': format_number(views),
@@ -540,6 +552,8 @@ def analyze_channel_deep(channel_id):
                 'total_views': format_number(int(ch_data['statistics'].get('viewCount', 0))), 
                 'video_count': format_number(int(ch_data['statistics'].get('videoCount', 0))),
                 'avg_recent_views': format_number(avg_views_calc),
+                'median_recent_views': format_number(statistics.median([v['raw_views'] for v in recent_videos]) if recent_videos else 0),
+                'sample_limit': sample_limit,
                 'recent_videos': recent_videos,
                 'favorite_upload_hour': best_hour_str,
                 'top_seo_tags': top_tags
@@ -741,6 +755,16 @@ def calculate_breakout_score(v):
     freshness_score = max(0, min(100, 100 - (v.get('age_hours', 999) / 168) * 100))
     relevance_score = v.get('query_relevance', 70)
 
+    components = {
+        'Kecepatan': (velocity_score, .30), 'Akselerasi': (acceleration_score, .20),
+        'Perbandingan baseline': (baseline_score, .15), 'Views/subscriber': (ratio_score, .10),
+        'Engagement': (er_score, .10), 'Kebaruan': (freshness_score, .10), 'Relevansi kata': (relevance_score, .05)
+    }
+    if v.get('snapshot_count', 0) < 2:
+        components['Akselerasi'] = (0, .20)
+        acceleration_score = 0
+    v['score_components'] = [{'Komponen': k, 'Nilai': round(value,1), 'Bobot': weight, 'Kontribusi': round(value*weight,1)} for k,(value,weight) in components.items()]
+    v['score_evidence'] = 'Terbatas' if v.get('snapshot_count',0) < 2 or v.get('channel_baseline_samples',0) < 3 else 'Snapshot dan baseline tersedia'
     score = (
         0.30 * velocity_score +
         0.20 * acceleration_score +

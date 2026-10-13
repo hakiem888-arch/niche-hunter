@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 import streamlit as st
+from modules.growth_ui import seo_page, research_page, evaluation_page, open_seo, save_watch
+from modules.growth_engine import ResearchStore, safe_video
 
 
 def clean_label(value):
@@ -112,6 +114,11 @@ def empty_state(title, detail):
 
 def save_result(key, rows, **context):
     # Context belongs to the submitted query, not to the currently edited form.
+    if rows:
+        try:
+            ResearchStore().save('history', str(time.time_ns()), {'mode': key, 'query': context.get('query',''), 'context': context.get('context',''), 'jumlah':len(rows), 'videos':[safe_video(r) for r in rows[:50] if r.get('id') and r.get('title') and r.get('link')]})
+        except OSError:
+            st.warning('Riwayat belum tersimpan. Hasil tetap tersedia selama sesi.')
     st.session_state[key] = {"rows": rows, "at": datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M UTC"),
                              "revision": time.time_ns(), **context}
     st.session_state["field_" + key + "_page"] = 1
@@ -140,10 +147,10 @@ def page_items(rows, name, size=6):
 def video_detail(video, backend, scope):
     metrics = [("Likes", video.get("likes", 0)), ("Komentar", video.get("comments", 0)),
                ("Engagement", f"{video.get('er', 0)}%"), ("Views / subscriber", video.get("ratio_label", "0x")),
-               ("Skor SEO heuristik", f"{video.get('seo_score', 0)}/100"),
+               ("Kelengkapan metadata", f"{video.get('seo_score', 0)}/100"),
                ("Estimasi pendapatan", video.get("earnings", "Tidak tersedia"))]
     st.dataframe(pd.DataFrame(metrics, columns=["Indikator", "Nilai"]), hide_index=True, use_container_width=True)
-    st.caption("Pendapatan adalah estimasi kasar dari rumus aplikasi. VPH pencarian adalah rata-rata sejak publikasi, bukan laju real-time.")
+    st.caption("Pendapatan perlu asumsi RPM dari pengguna. VPH pencarian adalah rata-rata sejak publikasi, bukan laju real-time.")
     st.write("**Ringkasan deskripsi**")
     for point in video.get("summary", []):
         st.write(point)
@@ -153,6 +160,17 @@ def video_detail(video, backend, scope):
     if video.get("tags"):
         st.caption("Tag video")
         st.code(", ".join(video["tags"]), language="text")
+    c,d = st.columns(2)
+    c.button('Optimalkan ide ini',key=f'seo_{scope}_{video["id"]}',on_click=open_seo,args=(video,),use_container_width=True)
+    d.button('Simpan watchlist',key=f'watch_{scope}_{video["id"]}',on_click=save_watch,args=(video,),use_container_width=True)
+    with st.expander('Simulasi pendapatan berdasarkan asumsi RPM'):
+        currency=st.selectbox('Mata uang',['IDR','USD'],key=f'currency_{scope}_{video["id"]}')
+        low=st.number_input('Asumsi RPM minimum',min_value=0.0,value=0.0,key=f'rpm_lo_{scope}_{video["id"]}')
+        high=st.number_input('Asumsi RPM maksimum',min_value=0.0,value=0.0,key=f'rpm_hi_{scope}_{video["id"]}')
+        views=video.get('raw_views',video.get('views',0))
+        if high < low: st.warning('RPM maksimum harus minimal sama dengan minimum.')
+        elif high > 0: st.write(f'Skenario {currency}: {views/1000*low:,.2f} sampai {views/1000*high:,.2f}')
+        st.caption('Asumsi diisi pengguna. Bukan pendapatan terukur dan tidak memperhitungkan seluruh faktor monetisasi.')
     a, b = st.columns(2)
     a.button("Analisis channel", key=f"analyze_{scope}_{video['id']}", on_click=route,
              args=("Channel", "Analisis", video["channel_id"]), use_container_width=True)
@@ -381,6 +399,12 @@ def viral_page(backend):
             st.caption(f"Snapshot tersedia: {chosen.get('snapshot_count', 0)}. Scan pertama dapat menggunakan rata-rata sejak publikasi.")
             if chosen.get("channel_baseline_samples", 0) < 3:
                 st.warning("Sampel baseline channel kurang dari 3 video. Perlakukan skor sebagai sinyal awal.")
+            st.caption('Skor heuristik belum dikalibrasi sebagai probabilitas viral. Indikator dapat saling berkorelasi.')
+            st.write('Kecukupan data: '+chosen.get('score_evidence','Belum tersedia'))
+            if chosen.get('score_components'):
+                st.dataframe(pd.DataFrame(chosen['score_components']),hide_index=True,use_container_width=True)
+            st.button('Optimalkan ide ini',key='seo_viral_selected',on_click=open_seo,args=(chosen,))
+            st.button('Simpan watchlist',key='watch_viral_selected',on_click=save_watch,args=(chosen,))
             st.link_button("Tonton video", chosen["link"])
     with tab3:
         st.caption(f"Referensi terpilih: {chosen['title']}")
@@ -502,8 +526,11 @@ def analysis_page(backend):
         else:
             empty_state("Pilih channel untuk dianalisis", "Cari nama channel di atas atau gunakan tombol Analisis dari hasil pencarian.")
         return
+    sample = st.selectbox('Jumlah video sampel', [5,15,30,50], key='channel_sample_size')
+    cache_entry = st.session_state.get('channel_details',{}).get(channel_id)
+    changed = bool(cache_entry and cache_entry[1].get('sample_limit',5) != sample)
     a, b, c = st.columns(3)
-    refresh = a.button("Perbarui data", key="refresh_channel")
+    refresh = a.button("Perbarui data", key="refresh_channel") or changed
     b.button("Tambahkan ke perbandingan", on_click=compare_add, args=(channel_id,), key="compare_current")
     if c.button("Tutup analisis"):
         st.session_state["selected_channel"] = None
@@ -527,6 +554,9 @@ def analysis_page(backend):
     tab1, tab2 = st.tabs(["Performa dan video", "Tag SEO"])
     with tab1:
         st.write(f"Rerata views ({len(data.get('recent_videos', []))} video sampel): **{data['avg_recent_views']}**")
+        if data.get('median_recent_views'):
+            st.write(f"Median views: **{data['median_recent_views']}**")
+        st.caption('Sampel video terbaru memiliki usia berbeda. Views belum dinormalisasi terhadap umur video.')
         st.write(f"Pola jam publikasi: **{data['favorite_upload_hour']}**")
         st.caption("Pola publikasi bukan bukti jam terbaik untuk mendapatkan views.")
         for video in data.get("recent_videos", []):
@@ -643,6 +673,8 @@ def artists_page(backend):
 
 def render_app(services):
     backend = SimpleNamespace(**services)
+    if st.session_state.get('notice'):
+        st.info(st.session_state.pop('notice'))
     stylesheet = Path(__file__).with_name("simple_ui.css").read_text(encoding="utf-8")
     st.markdown("<style>" + stylesheet + "</style>", unsafe_allow_html=True)
     prefs = st.session_state.setdefault("ui_preferences", {})
@@ -656,12 +688,12 @@ def render_app(services):
     st.session_state.setdefault("nav_section", prefs.get("section", "Video"))
     with st.sidebar:
         st.markdown('<div class="brand"><span class="brand-mark">N</span><div><strong>Niche Hunter</strong><small>Ruang riset pribadi</small></div></div>', unsafe_allow_html=True)
-        section = st.radio("Ruang kerja", ["Video", "Channel", "Artis"], key="nav_section")
+        section = st.radio("Ruang kerja", ["Video", "Channel", "Artis", "Studio"], key="nav_section")
         prefs["section"] = section
         queue = st.session_state.get("compare_list", [])
         st.caption(f"Perbandingan: {len(queue)}/4 channel")
         with st.expander("Pengaturan dan bantuan"):
-            st.caption(f"YouTube: kunci {st.session_state.get('current_api_index', 0)+1} dari {len(backend.API_KEYS)}")
+            st.caption(f'YouTube: {len(backend.API_KEYS)} kunci tersedia')
             st.caption("Gemini: " + ("tersedia" if backend.GEMINI_API_KEY else "belum diatur"))
             try:
                 groq = bool(st.secrets.get("GROQ_API_KEY", ""))
@@ -671,7 +703,7 @@ def render_app(services):
             st.write("Gunakan filter lanjutan untuk mempersempit pencarian. Semua fitur tersedia di ruang kerja yang sesuai.")
             st.caption("Hasil dan jawaban AI tersimpan selama sesi browser. CSV dapat diunduh untuk disimpan.")
     options = {"Video": ["Pencarian", "Trending", "Viral Intelligence"],
-               "Channel": ["Direktori", "Analisis", "Perbandingan"], "Artis": ["Perbandingan artis"]}[section]
+               "Channel": ["Direktori", "Analisis", "Perbandingan"], "Artis": ["Perbandingan artis"], "Studio": ["SEO Studio", "Ruang riset", "Evaluasi channel"]}[section]
     key = "nav_" + section
     if key not in st.session_state:
         st.session_state[key] = prefs.get(section + "_page", options[0])
@@ -684,5 +716,7 @@ def render_app(services):
             video_search(backend, trending=page == "Trending")
     elif section == "Channel":
         {"Direktori": directory_page, "Analisis": analysis_page, "Perbandingan": comparison_page}[page](backend)
-    else:
+    elif section == 'Artis':
         artists_page(backend)
+    else:
+        {'SEO Studio':seo_page,'Ruang riset':research_page,'Evaluasi channel':evaluation_page}[page](backend)
