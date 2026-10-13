@@ -1,3 +1,7 @@
+# Hotfix 2.0.1
+
+Jika Anda sudah memasang versi 2.0, ekstrak paket ini, ganti hanya `modules/simple_ui.py` di proyek Anda, lalu restart aplikasi. Perbaikan memisahkan state pilihan kunci API dari state backend untuk mengatasi error `current_api_index cannot be modified after the widget is instantiated`. Pertahankan Secrets serta folder data Anda.
+
 # Panduan upgrade Niche Hunter 2.0
 
 Tanggal rilis paket: 14 Oktober 2026 (WIB).

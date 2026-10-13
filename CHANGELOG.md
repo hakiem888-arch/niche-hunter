@@ -1,3 +1,11 @@
+# Hotfix 2.0.1 — 14 Oktober 2026 (WIB)
+
+- Memisahkan key widget `youtube_api_selector` dari state backend `current_api_index`.
+- Callback pilihan kunci memperbarui state backend sebelum halaman dirender.
+- Memperbaiki error Streamlit saat proses API menyimpan indeks setelah widget dibuat.
+- Dua tes regresi lulus: pencarian/Trending dengan dua kunci serta navigasi, dan pengurangan jumlah kunci terkonfigurasi.
+- Untuk instalasi 2.0, cukup ganti `modules/simple_ui.py` lalu restart aplikasi. Secrets dan data tidak perlu diganti.
+
 # Niche Hunter 2.0 — 14 Oktober 2026 (WIB)
 
 - Enam mode baru: Keyword Lab, Radar kompetitor, Rank Tracker, Kalender konten, Eksperimen CTR dan Audit massal.

@@ -1,3 +1,7 @@
+# Validasi hotfix 2.0.1
+
+`python -m unittest tests.test_api_selection -v`: 2 tes regresi lulus (1,852 detik). Tes menggunakan entrypoint aplikasi sebenarnya dan respons API mock. Memeriksa perubahan kunci, pencarian, Trending, navigasi, dan jumlah kunci yang menyusut. Pengujian API dengan kredensial nyata tidak dilakukan. Hasil 57 tes rilis 2.0 di bawah merupakan hasil run sebelumnya.
+
 # Validasi Niche Hunter 2.0
 
 Tanggal: 14 Oktober 2026 (WIB). Python 3.12.14; Streamlit 1.65.0; Pandas 2.2.3.

@@ -675,6 +675,11 @@ def artists_page(backend):
         st.write("Long-form dan Shorts-like adalah klasifikasi perkiraan. Google Trends merupakan sumber indeks relatif yang terpisah.")
 
 
+def select_active_api_key():
+    """Keep the widget-owned value separate from backend session state."""
+    st.session_state['current_api_index'] = st.session_state['youtube_api_selector']
+
+
 def render_app(services):
     backend = SimpleNamespace(**services)
     if st.session_state.get('notice'):
@@ -699,7 +704,11 @@ def render_app(services):
         with st.expander("Pengaturan dan bantuan"):
             st.caption(f'YouTube: {len(backend.API_KEYS)} kunci tersedia')
             if len(backend.API_KEYS)>1:
-                st.selectbox('Kunci YouTube aktif',range(len(backend.API_KEYS)),format_func=lambda i:f'Kunci {i+1}',key='current_api_index')
+                choices = range(len(backend.API_KEYS))
+                if st.session_state.get('youtube_api_selector') not in choices:
+                    st.session_state['youtube_api_selector'] = int(st.session_state.get('current_api_index',0)) % len(backend.API_KEYS)
+                st.selectbox('Kunci YouTube aktif',choices,format_func=lambda i:f'Kunci {i+1}',
+                             key='youtube_api_selector',on_change=select_active_api_key)
             usage=st.session_state.get('youtube_usage',{})
             st.caption(f"Panggilan API sesi: {usage.get('calls',0)} · pencarian: {usage.get('search',0)} · cache: {usage.get('cache_hits',0)}")
             st.caption('Cache 5 menit. Angka di atas menghitung panggilan sesi ini, bukan saldo kuota proyek. Kunci tidak diputar otomatis saat kuota habis.')
