@@ -1,13 +1,11 @@
-# Validasi versi pengembangan
+# Validasi perbaikan watchlist dan evaluasi
 
-Tanggal: 13 Oktober 2026.
+Tanggal: 13 Oktober 2026. Python 3.12.14, Streamlit 1.65.0, Pandas 2.2.3.
 
-Python: 3.12.14. Streamlit: 1.65.0. Pandas: 2.2.3.
+Perintah: `python -m unittest tests.test_usability tests.test_growth tests.test_ui -v`.
 
-Perintah: `python -m unittest tests.test_ui tests.test_growth -v`.
+Hasil: 29 pengujian lulus. Enam pengujian tambahan memeriksa penghapusan permanen video dan referensi manual lintas sesi, kegagalan database yang dilaporkan ke pengguna, contoh evaluasi tanpa kredensial, angka berformat Indonesia, baris total, angka tidak valid dan kolom minimum.
 
-Hasil: 23 pengujian lulus.
+Kegagalan penghapusan yang dilaporkan pengguna belum dapat direproduksi pada versi sebelumnya dalam AppTest lokal. Alur penghapusan diperkuat dengan callback sebelum perenderan ulang, tombol yang terlihat langsung, serta umpan balik operasi. Instalasi pengguna belum diperiksa.
 
-Pengujian memakai data simulasi, direktori database sementara, AppTest, dan respons AI tiruan. Kunci API nyata tidak digunakan. Startup tanpa Secrets, impor CSV beserta grafik, watchlist, brief, perpindahan dari pencarian ke SEO, rubrik audit, chapter, pemulihan cadangan, snapshot interval dan komponen breakout diperiksa.
-
-Belum divalidasi: panggilan end-to-end YouTube/Gemini/Groq menggunakan kredensial nyata, pengujian browser/perangkat seluler, kalibrasi statistik skor, autentikasi multiuser, OAuth, dan deployment eksternal.
+Integrasi API nyata, browser/perangkat seluler dan deployment eksternal belum diuji. Koneksi OAuth belum diimplementasikan.

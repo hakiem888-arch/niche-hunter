@@ -1,3 +1,13 @@
+# Pembaruan watchlist dan evaluasi, 13 Oktober 2026
+
+- Tombol hapus watchlist terlihat langsung pada daftar. Penghapusan memakai callback sebelum perenderan ulang dan menyampaikan hasil operasi.
+- Pesan kegagalan database terlihat tanpa menghilangkan referensi dari tampilan.
+- Enam pengujian baru mencakup penghapusan video/niche lintas sesi, kegagalan tulis database, mode contoh, angka Indonesia, nilai tidak valid, dan kolom minimum.
+- Evaluasi channel memiliki panduan ekspor Studio, mode contoh berlabel simulasi, pratinjau CSV dan pilihan format angka.
+- Baris Total pada kolom ID maupun Judul dikeluarkan sebelum validasi angka.
+- Pesan kesalahan menjelaskan kolom yang perlu diperiksa; pilihan pemetaan dipisahkan untuk setiap file.
+- Koneksi OAuth belum diimplementasikan. Konsep dan persiapannya dijelaskan dalam README.
+
 # Perubahan 13 Oktober 2026
 
 ## Ditambahkan

@@ -98,7 +98,9 @@ class ResearchStore:
         with self.connect() as c:
             return [{'id': r[0], 'payload': json.loads(r[1]), 'updated': r[2]} for r in c.execute('SELECT id,payload,updated FROM records WHERE kind=? ORDER BY updated DESC', (kind,))]
     def delete(self, kind, ident):
-        with self.connect() as c: c.execute('DELETE FROM records WHERE kind=? AND id=?', (kind, str(ident)))
+        with self.connect() as c:
+            deleted = c.execute('DELETE FROM records WHERE kind=? AND id=?', (kind, str(ident))).rowcount
+        return bool(deleted)
     def export(self):
         return json.dumps({'schema': 1, 'watchlist': self.list('watchlist'), 'brief': self.list('brief'), 'history': self.list('history')}, ensure_ascii=False, indent=2)
     def restore(self, value):

@@ -1,5 +1,7 @@
 """Integrated SEO, research notebook and owner CSV evaluation."""
 import json
+import io
+import sqlite3
 from hashlib import sha256
 import pandas as pd
 import requests
@@ -9,6 +11,18 @@ from modules.growth_engine import (ResearchStore, seo_audit, keyword_groups, gap
 
 def store():
     return ResearchStore()
+
+def delete_research(kind, ident):
+    """Commit before rerendering the list and retain feedback for the next run."""
+    try:
+        removed = store().delete(kind, ident)
+    except (OSError, sqlite3.Error):
+        st.session_state['research_feedback'] = ('error', 'Data belum terhapus. Database mungkin sedang digunakan atau tidak dapat ditulis. Coba lagi; periksa izin folder data bila tetap gagal.')
+        return
+    st.session_state.pop('note_' + str(ident), None)
+    label = 'Referensi' if kind == 'watchlist' else 'Brief'
+    message = f'{label} berhasil dihapus.' if removed else f'{label} sudah tidak ada dalam daftar.'
+    st.session_state['research_feedback'] = ('success', message)
 
 def open_seo(video):
     # Widget keys are reset in the callback, before the next render.
@@ -126,6 +140,9 @@ def seo_page(backend):
 def research_page(backend):
     st.title('Ruang riset')
     st.caption('Watchlist, catatan, brief, dan 30 pencarian terakhir. Cadangkan data sebelum mengganti hosting.')
+    feedback = st.session_state.pop('research_feedback', None)
+    if feedback:
+        getattr(st, feedback[0])(feedback[1])
     db = store()
     tabs = st.tabs(['Watchlist','Brief tersimpan','Riwayat riset','Cadangan'])
     with tabs[0]:
@@ -144,18 +161,22 @@ def research_page(backend):
                     db.save('watchlist',ident,{'video':{'title':title,'link':link,'kind':kind},'note':note})
                     st.success('Referensi tersimpan.')
         entries=db.list('watchlist')
+        st.caption(f'{len(entries)} referensi tersimpan. Tombol hapus mengeluarkan referensi dari watchlist.')
         if not entries: st.info('Gunakan Simpan watchlist pada detail video untuk mulai menyimpan referensi.')
         for entry in entries:
             payload=entry['payload']; video=payload.get('video',{})
-            with st.expander(video.get('title',entry['id'])):
+            heading, remove = st.columns([4, 1])
+            heading.write(video.get('title',entry['id']))
+            remove.button('Hapus', key='del_watch_'+entry['id'], on_click=delete_research,
+                          args=('watchlist', entry['id']), help='Hapus referensi ini dari watchlist', use_container_width=True)
+            with st.expander('Catatan dan detail referensi'):
                 st.caption('Disimpan: '+entry['updated'])
                 if video.get('link','').startswith('https://'): st.link_button('Buka referensi',video['link'])
                 note=st.text_area('Catatan riset',value=payload.get('note',''),key='note_'+entry['id'])
-                a,b,c=st.columns(3)
+                a,b=st.columns(2)
                 if a.button('Simpan catatan',key='save_note_'+entry['id']):
                     db.save('watchlist',entry['id'],{'video':video,'note':note}); st.success('Catatan tersimpan.')
                 b.button('Optimalkan ide ini',key='seo_watch_'+entry['id'],on_click=open_seo,args=(video,))
-                if c.button('Hapus referensi',key='del_watch_'+entry['id']): db.delete('watchlist',entry['id']); st.rerun()
                 if video.get('id') and hasattr(backend,'get_snapshot_history'):
                     history=backend.get_snapshot_history(video['id'],30)
                     if len(history)>=2:
@@ -170,7 +191,7 @@ def research_page(backend):
             with st.expander(entry['payload'].get('title',entry['id'])):
                 text=entry['payload'].get('text',''); st.markdown(text)
                 st.download_button('Unduh',text,'brief-'+entry['id']+'.md',key='brief_dl_'+entry['id'])
-                if st.button('Hapus brief',key='brief_del_'+entry['id']): db.delete('brief',entry['id']); st.rerun()
+                st.button('Hapus brief',key='brief_del_'+entry['id'],on_click=delete_research,args=('brief',entry['id']))
     with tabs[2]:
         entries=db.list('history')
         if entries:
@@ -196,62 +217,109 @@ ALIASES = {
     'title':['video title','title','judul video','judul'],
     'views':['views','penayangan'],
     'impressions':['impressions','impresi','tayangan'],
-    'ctr':['impressions click-through rate (%)','impressions click-through rate','rasio klik-tayang dari tayangan (%)','rasio klik-tayang impresi (%)','ctr','ctr (%)'],
-    'retention':['average percentage viewed (%)','average percentage viewed','persentase rata-rata ditonton (%)','persentase rata-rata ditonton','retention','retention (%)'],
+    'ctr':['impressions click-through rate (%)','impressions click-through rate','rasio klik-tayang dari tayangan (%)','rasio klik-tayang dari tayangan','rasio klik-tayang tayangan (%)','rasio klik-tayang tayangan','rasio klik-tayang impresi (%)','ctr','ctr (%)'],
+    'retention':['average percentage viewed (%)','average percentage viewed','persentase rata-rata ditonton (%)','persentase rata-rata ditonton','persentase penayangan rata-rata (%)','persentase penayangan rata-rata','retention','retention (%)'],
 }
 
-def normalize_report(df, mapping=None):
+def normalize_report(df, mapping=None, number_format='international'):
     if mapping is None:
         lookup={str(c).strip().lower():c for c in df.columns}
         mapping={key:next((lookup[a] for a in values if a in lookup),None) for key,values in ALIASES.items()}
+    # Totals may appear only in the ID column, with an empty title or metrics.
+    total_mask = pd.Series(False, index=df.index)
+    for key in ('video', 'title'):
+        column = mapping.get(key)
+        if column is not None and column != 'Tidak tersedia':
+            total_mask |= df[column].fillna('').astype(str).str.strip().str.lower().isin(['total','jumlah','keseluruhan'])
+    df = df.loc[~total_mask].copy()
     out=pd.DataFrame(index=df.index)
     for key,column in mapping.items():
         if column is None or column=='Tidak tersedia': continue
         if key in ('video','title'): out[key]=df[column].fillna('').astype(str)
         else:
-            series=df[column].astype(str).str.strip().str.replace('%','',regex=False)
+            def parse_number(value):
+                if not isinstance(value, str): return value
+                value = value.strip().replace('%', '').replace('\u00a0', '').replace(' ', '')
+                if number_format == 'indonesia': return value.replace('.', '').replace(',', '.')
+                return value.replace(',', '')
+            series=df[column].map(parse_number)
             numeric=pd.to_numeric(series,errors='coerce')
-            if numeric.isna().any() or (numeric < 0).any(): raise ValueError(f'Kolom {column} memiliki angka kosong/tidak valid. Gunakan angka tanpa pemisah ribuan dengan titik desimal.')
+            if numeric.isna().any() or numeric.isin([float('inf'), -float('inf')]).any() or (numeric < 0).any(): raise ValueError(f'Kolom {column} memiliki angka kosong/tidak valid. Periksa format angka; kolom opsional yang kosong dapat dipilih sebagai Tidak tersedia.')
             if key == 'ctr' and (numeric>100).any(): raise ValueError(f'Kolom {column} harus dalam persen 0 sampai 100.')
             out[key]=numeric
     if 'views' not in out or not any(c in out for c in ('video','title')): raise ValueError('Petakan kolom Views serta Video ID atau Judul.')
-    # YouTube Studio often includes a Total row. Exclude it from video rankings.
-    label=out.get('title',out.get('video')).str.strip().str.lower()
-    out=out.loc[~label.isin(['total','jumlah','keseluruhan'])]
     if out.empty: raise ValueError('Tidak ada baris video setelah baris total dikeluarkan.')
     return out
 
+DEMO_REPORT = '''Video ID,Video title,Views,Impressions,Impressions click-through rate (%),Average percentage viewed (%)
+contoh_1,Contoh simulasi A,1000,15000,3.2,62
+contoh_2,Contoh simulasi B,2000,25000,7.1,31
+contoh_3,Contoh simulasi C,1500,20000,5.0,48
+'''
+
 def evaluation_page(backend):
     st.title('Evaluasi channel sendiri')
-    st.caption('Impor CSV per video dari YouTube Studio. Evaluasi ini memakai data Anda, tanpa koneksi OAuth.')
+    st.caption('Unggah laporan dari YouTube Studio atau coba contoh terlebih dahulu. Fitur ini belum memerlukan login Google di aplikasi.')
+    with st.expander('Petunjuk mengambil laporan YouTube Studio', expanded='owner_report' not in st.session_state):
+        st.markdown('''1. Buka **YouTube Studio** di komputer, lalu pilih **Analytics**.
+2. Buka **Mode lanjutan** atau **Lihat lainnya**. Pilih periode, misalnya 28 hari terakhir.
+3. Pilih pengelompokan **Konten/video** sehingga setiap baris mewakili satu video.
+4. Sertakan **Penayangan (Views)**. Tambahkan **Impresi/Tayangan**, **CTR**, dan **Persentase rata-rata ditonton** jika tersedia.
+5. Klik **Ekspor tampilan saat ini**, lalu pilih **CSV**. Jika hasil unduhan berupa ZIP, ekstrak dan pilih CSV tabel per video, bukan data harian.
+6. Unggah CSV di bawah. Cocokkan nama kolom, pilih format angka yang sesuai, lalu klik **Analisis laporan**.''')
+        st.link_button('Buka YouTube Studio', 'https://studio.youtube.com/')
+        st.caption('Kolom minimum: Video ID atau Judul, serta Views. CTR dan persentase ditonton diperlukan untuk grafik dan saran peninjauan.')
+        st.markdown('[Panduan ekspor resmi YouTube](https://support.google.com/youtube/answer/9717005?hl=id)')
+    source = st.radio('Mulai evaluasi', ['Unggah CSV saya', 'Coba contoh simulasi'], horizontal=True, key='evaluation_source')
     st.info('Gunakan periode laporan yang sama untuk membandingkan video. CTR dan retensi ditafsirkan bersama sumber trafik, umur video, serta formatnya.')
-    upload=st.file_uploader('Laporan CSV',type=['csv'],key='report_csv')
-    if not upload: return
+    is_demo = source == 'Coba contoh simulasi'
+    if is_demo:
+        st.warning('Data simulasi untuk mempelajari fitur. Angka ini bukan performa channel Anda.')
+        data = DEMO_REPORT.encode('utf-8-sig')
+        st.download_button('Unduh contoh format CSV', data, 'contoh-evaluasi-simulasi.csv', 'text/csv')
+    else:
+        upload=st.file_uploader('Laporan CSV per video',type=['csv'],key='report_csv')
+        if not upload: return
+        if upload.size > 10_000_000:
+            st.error('Ukuran CSV maksimal 10 MB.'); return
+        data = upload.getvalue()
     try:
-        if upload.size > 10_000_000: raise ValueError('Ukuran CSV maksimal 10 MB.')
-        raw=pd.read_csv(upload,sep=None,engine='python',encoding='utf-8-sig')
+        digest = sha256(data).hexdigest()
+        raw=pd.read_csv(io.BytesIO(data),sep=None,engine='python',encoding='utf-8-sig', dtype=str)
         if len(raw)>10000: raise ValueError('Maksimal 10.000 baris per laporan.')
+        if raw.empty: raise ValueError('CSV tidak memiliki baris data. Gunakan laporan tabel per video.')
+        st.write('Pratinjau laporan')
+        st.dataframe(raw.head(5), hide_index=True, use_container_width=True)
         lookup={str(c).strip().lower():c for c in raw.columns}
         with st.form('report_mapping'):
-            st.write('Petakan kolom laporan')
+            st.write('Cocokkan kolom laporan')
+            st.caption('Pilihan awal mengikuti nama kolom yang dikenali. Kolom opsional boleh Tidak tersedia.')
+            locale = st.selectbox('Format angka pada CSV', ['Titik desimal: 1,234.5 atau 1234.5', 'Koma desimal: 1.234,5 atau 1234,5'], key='report_locale_'+digest[:12])
             choices=['Tidak tersedia']+list(raw.columns); mapping={}
             labels={'video':'Video ID','title':'Judul','views':'Views','impressions':'Impresi','ctr':'CTR (%)','retention':'Rata-rata persentase ditonton (%)'}
             for key,aliases in ALIASES.items():
                 default=next((lookup[a] for a in aliases if a in lookup),'Tidak tersedia')
-                mapping[key]=st.selectbox(labels[key],choices,index=choices.index(default),key='map_'+key)
+                mapping[key]=st.selectbox(labels[key],choices,index=choices.index(default),key='map_'+digest[:12]+'_'+key)
             run=st.form_submit_button('Analisis laporan')
+        number_format = 'indonesia' if locale.startswith('Koma') else 'international'
         if run:
-            frame=normalize_report(raw,mapping)
-            st.session_state['owner_report']={'hash':sha256(upload.getvalue()).hexdigest(),'frame':frame}
+            st.session_state.pop('owner_report', None)
+            frame=normalize_report(raw,mapping,number_format)
+            st.session_state['owner_report']={'hash':digest,'frame':frame,'mapping':mapping,'number_format':number_format}
         bundle=st.session_state.get('owner_report')
-        if not bundle or bundle['hash']!=sha256(upload.getvalue()).hexdigest(): return
+        if not bundle or bundle['hash']!=digest: return
+        if mapping != bundle.get('mapping') or number_format != bundle.get('number_format'):
+            st.info('Pemetaan atau format angka berubah. Klik Analisis laporan untuk memperbarui hasil.'); return
         frame=bundle['frame']; a,b,c=st.columns(3)
         a.metric('Video dalam laporan',len(frame)); b.metric('Total views',f"{frame['views'].sum():,.0f}"); c.metric('Median views',f"{frame['views'].median():,.0f}")
         st.dataframe(frame.sort_values('views',ascending=False),hide_index=True,use_container_width=True)
+        st.caption('Total di atas adalah jumlah video pada CSV, bukan selalu total channel. Ekspor atau filter dapat membatasi cakupan laporan.')
         if 'ctr' in frame:
             st.metric('Median CTR per video',f"{frame['ctr'].median():.2f}%")
             st.caption('Median per video, bukan CTR agregat channel. Nol dan perbedaan sumber trafik dapat memengaruhi interpretasi.')
         if 'retention' in frame: st.metric('Median persentase ditonton',f"{frame['retention'].median():.2f}%")
+        if not {'ctr','retention'}.issubset(frame.columns):
+            st.info('Ringkasan views sudah tersedia. Untuk grafik dan saran peninjauan, tambahkan kolom CTR serta persentase rata-rata ditonton pada laporan.')
         if {'ctr','retention'}.issubset(frame.columns):
             chart=frame.copy(); chart['Penayangan']=chart['views']; st.scatter_chart(chart,x='ctr',y='retention',size='Penayangan')
             st.caption('Sumbu X: CTR (%). Sumbu Y: persentase ditonton (%). Ukuran titik: views. Posisi relatif bukan bukti sebab-akibat.')
@@ -260,5 +328,5 @@ def evaluation_page(backend):
             notes['Tinjauan']=notes.apply(lambda r: 'Tinjau judul/thumbnail dan kecocokan penonton' if r['ctr']<low_ctr and r['retention']>=low_ret else 'Tinjau pembuka dan kesesuaian janji judul' if r['ctr']>=low_ctr and r['retention']<low_ret else 'Tinjau metadata dan isi bersama' if r['ctr']<low_ctr and r['retention']<low_ret else 'Pelajari pola video ini',axis=1)
             st.dataframe(notes,hide_index=True,use_container_width=True)
         st.download_button('Unduh hasil normalisasi',frame.to_csv(index=False).encode('utf-8-sig'),'evaluasi-channel.csv','text/csv')
-    except (ValueError,pd.errors.ParserError,UnicodeDecodeError):
-        st.error('CSV belum dapat dianalisis. Periksa pemetaan, gunakan UTF-8, nilai CTR 0 sampai 100, dan angka tanpa pemisah ribuan dengan titik desimal.')
+    except (ValueError,pd.errors.ParserError,UnicodeDecodeError) as exc:
+        st.error('CSV belum dapat dianalisis. ' + str(exc))

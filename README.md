@@ -33,6 +33,12 @@ GROQ_API_KEY = "ISI_KUNCI_ANDA"
 
 Paket ini tidak mengubah deployment publik atau repositori eksternal secara otomatis.
 
+## Pembaruan kemudahan penggunaan
+
+Untuk pengguna paket sebelumnya, perubahan aplikasi ada pada `modules/growth_ui.py` dan `modules/growth_engine.py`. Ganti kedua file tersebut atau folder `modules/`, kemudian restart aplikasi. Sebelum memperbarui hosting, unduh cadangan JSON dari Ruang riset > Cadangan. Pertahankan folder data serta Secrets.
+
+Tombol Hapus sekarang terlihat di samping setiap referensi watchlist. Penghapusan dilakukan sebelum daftar dirender ulang dan menampilkan pesan keberhasilan atau kegagalan. Menghapus watchlist tidak menghapus rekaman sumber pada riwayat riset.
+
 ## Alur fitur baru
 
 ### SEO Studio
@@ -57,13 +63,25 @@ Unduh cadangan JSON dari tab Cadangan. Pemulihan menggabungkan watchlist, brief 
 
 ### Evaluasi channel sendiri
 
-Ekspor CSV per video dari YouTube Studio, pilih periode yang konsisten, lalu unggah melalui menu **Studio > Evaluasi channel**. Petakan Video ID atau Judul, Views, dan kolom opsional Impresi, CTR (%) dan persentase rata-rata ditonton (%).
+Untuk mencoba tanpa data channel, buka **Studio > Evaluasi channel**, pilih **Coba contoh simulasi**, kemudian klik **Analisis laporan**. Data contoh diberi label simulasi dan dapat diunduh sebagai contoh format.
 
-Format numerik: angka tanpa pemisah ribuan dan titik sebagai pemisah desimal. CTR menggunakan skala 0 sampai 100. Persentase rata-rata ditonton menerima nilai nonnegatif, termasuk lebih dari 100 bila demikian tercatat pada sumber. Nilai kosong dalam kolom numerik yang dipetakan perlu dibersihkan atau kolom tersebut dibiarkan tidak dipetakan. CSV maksimal 10 MB dan 10.000 baris.
+Untuk memakai data sendiri:
+
+1. Buka YouTube Studio di komputer. Pilih Analytics > Mode lanjutan atau Lihat lainnya.
+2. Pilih rentang tanggal, misalnya 28 hari terakhir, dan pengelompokan Konten/video. Setiap baris harus mewakili satu video.
+3. Sertakan Penayangan (Views). Tambahkan Impresi/Tayangan, CTR, serta persentase rata-rata ditonton bila tersedia.
+4. Pilih Ekspor tampilan saat ini > CSV. Jika unduhan berupa ZIP, ekstrak lalu pilih CSV tabel per video, bukan laporan harian.
+5. Buka Studio > Evaluasi channel > Unggah CSV saya pada aplikasi. Periksa pratinjau, cocokkan kolom, pilih format angka, lalu klik Analisis laporan.
+
+Kolom wajib adalah Video ID atau Judul dan Views. Kolom lain opsional. Grafik serta saran peninjauan memerlukan CTR dan persentase rata-rata ditonton. Total views yang ditampilkan merupakan total baris video dalam CSV, bukan otomatis total channel.
+
+Format numerik dipilih sesuai CSV: titik desimal (contoh 1,234.5) atau koma desimal (contoh 1.234,5). Pemisah ribuan opsional. Periksa pratinjau sebelum memilih format; aplikasi tidak menebak arti angka yang ambigu. CTR menggunakan skala 0 sampai 100. Persentase rata-rata ditonton menerima nilai nonnegatif, termasuk lebih dari 100 bila demikian tercatat pada sumber. Nilai kosong dalam kolom numerik yang dipetakan perlu dibersihkan atau kolom tersebut dibiarkan tidak dipetakan. CSV maksimal 10 MB dan 10.000 baris.
 
 Hasil berisi tabel per video, median, grafik CTR terhadap persentase ditonton, dan saran peninjauan relatif terhadap median sampel. Ini bukan diagnosis sebab-akibat. Baris Total dikeluarkan. Median CTR per video bukan CTR agregat channel. Laporan tinggal dalam sesi aplikasi dan tidak dikirim ke AI atau disimpan secara otomatis ke database.
 
-Koneksi OAuth belum ditambahkan. Impor CSV merupakan jalur evaluasi channel sendiri pada versi ini.
+Koneksi OAuth belum ditambahkan. Pengguna login ke YouTube Studio untuk mengekspor CSV; aplikasi ini tidak meminta login atau password Google.
+
+Jika integrasi otomatis dibangun, aplikasi akan membuka halaman Google melalui OAuth. Pemilik channel memilih akun, memberikan izin baca analitik, lalu kembali ke aplikasi. Aplikasi menggunakan token izin, bukan password pengguna. Pengembang perlu mengaktifkan API, membuat kredensial OAuth dan mengatur alamat callback. API key untuk riset data publik saja tidak memberikan akses analitik pribadi. Metrik yang tersedia melalui API perlu diperiksa sebelum menjanjikan kesetaraan dengan seluruh tampilan Studio.
 
 ## Indikator yang diperjelas
 
@@ -84,7 +102,7 @@ Semua sesi yang memakai instalasi dan direktori data yang sama berbagi watchlist
 ## Pengujian
 
 ```bash
-python -m unittest tests.test_ui tests.test_growth -v
+python -m unittest tests.test_ui tests.test_growth tests.test_usability -v
 ```
 
 Pengujian menggunakan data simulasi dan tidak memanggil API nyata. Cakupan meliputi tujuh mode awal, state hasil pencarian, AI lama, pagination, perbandingan, SEO Studio, relevansi, chapter, penyimpanan lintas koneksi, pemulihan atomik, batas riwayat, pemetaan CSV, navigasi ke SEO, serta startup tanpa kredensial.
@@ -95,4 +113,6 @@ YouTube/Gemini/Groq belum diuji end-to-end dengan kredensial nyata dalam lingkun
 
 - [Cara kerja YouTube Search](https://support.google.com/youtube/answer/16090438?hl=en)
 - [Peran tag video](https://support.google.com/youtube/answer/146402?hl=en)
+- [Ekspor laporan dari YouTube Studio](https://support.google.com/youtube/answer/9717005?hl=id)
+- [Alur OAuth Google](https://developers.google.com/youtube/reporting/guides/authorization/server-side-web-apps)
 - [Otorisasi laporan channel](https://developers.google.com/youtube/analytics/channel_reports)
